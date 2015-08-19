@@ -20,8 +20,11 @@ explore different techniques to generate LR(k) parsing code
 # How-to
 
 Take a canonical example, Grammar 4.1 in _Aho_.
+
 1. manually go over all algorithms on paper, get very familar with LR(1) parsing process. How optimization works?
+
 2. write naive LR(1) parser on computer
+
 3. try different black technologies
   
 
