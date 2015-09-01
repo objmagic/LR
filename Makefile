@@ -2,7 +2,7 @@ all: clean build
 
 OCAMLBUILD = ocamlbuild
 OCAMLC = metaocamlc
-TARGET = lr_parser.byte
+TARGET = hlist.byte lr_parser.byte
 TAGS = annot,bin_annot
 PKGS = genlet
 
