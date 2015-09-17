@@ -6,15 +6,15 @@ type token =
 type empty = SEmpty
 
 (* stack *)
-and 'a cP = SP of 'a * 'a state       (* Plus *)
-and 'a cS = SS of 'a * 'a state       (* Star *)
-and 'a cL = SL of 'a * 'a state       (* Left *)
-and 'a cR = SR of 'a * 'a state       (* Right *)
+type 'a cP = SP : 'a * 'a state       -> 'a cP (* Plus *)
+and  'a cS = SS : 'a * 'a state       -> 'a cS (* Star *)
+and  'a cL = SL : 'a * 'a state       -> 'a cL (* Left *)
+and  'a cR = SR : 'a * 'a state       -> 'a cR (* Right *)
 (* last field is semantic value *)
-and 'a cI = SI of 'a * 'a state * int (* Int *)
-and 'a cE = SE of 'a * 'a state * int (* Expression *)
-and 'a cT = ST of 'a * 'a state * int (* Term *)
-and 'a cF = SF of 'a * 'a state * int (* Factor *)
+and  'a cI = SI : 'a * 'a state * int -> 'a cI (* Int *)
+and  'a cE = SE : 'a * 'a state * int -> 'a cE (* Expression *)
+and  'a cT = ST : 'a * 'a state * int -> 'a cT (* Term *)
+and  'a cF = SF : 'a * 'a state * int -> 'a cF (* Factor *)
 
 (* States in action/goto table *)
 and _ state =
