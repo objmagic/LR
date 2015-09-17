@@ -151,3 +151,17 @@ and gotoF : type a. a state -> token list -> a cF -> int = fun s tl stack ->
   | S7 -> action S10 tl stack
 
 let test () = action S0 [KInt 3; KPlus; KInt 2; EOF] SEmpty;;
+
+module GADT_free =
+struct
+  type 'a stateR = {
+      action: token list -> 'a -> int;
+      gotoE : token list -> 'a cE -> int;
+      gotoT : token list -> 'a cT -> int;
+      gotoF : token list -> 'a cF -> int;
+    }
+  let action {action} = action
+  let gotoE {gotoE} = gotoE
+  let gotoT {gotoT} = gotoT
+  let gotoF {gotoF} = gotoF
+end
