@@ -160,15 +160,15 @@ let test () = action S0 [KInt 3; KPlus; KInt 2; EOF] SEmpty;;
 module GADT_free =
 struct
   (* stack *)
-  type 'a cP = SP : 'a * 'a stateR       -> 'a cP (* Plus *)
-  and  'a cS = SS : 'a * 'a stateR       -> 'a cS (* Star *)
-  and  'a cL = SL : 'a * 'a stateR       -> 'a cL (* Left *)
-  and  'a cR = SR : 'a * 'a stateR       -> 'a cR (* Right *)
+  type 'a cP = 'a * 'a stateR        (* Plus *)
+  and  'a cS = 'a * 'a stateR        (* Star *)
+  and  'a cL = 'a * 'a stateR        (* Left *)
+  and  'a cR = 'a * 'a stateR        (* Right *)
   (* last field is semantic value *)
-  and  'a cI = SI : 'a * 'a stateR * int -> 'a cI (* Int *)
-  and  'a cE = SE : 'a * 'a stateR * int -> 'a cE (* Expression *)
-  and  'a cT = ST : 'a * 'a stateR * int -> 'a cT (* Term *)
-  and  'a cF = SF : 'a * 'a stateR * int -> 'a cF (* Factor *)
+  and  'a cI = 'a * 'a stateR * int  (* Int *)
+  and  'a cE = 'a * 'a stateR * int  (* Expression *)
+  and  'a cT = 'a * 'a stateR * int  (* Term *)
+  and  'a cF = 'a * 'a stateR * int  (* Factor *)
   and 'a stateR = {
       gotoE : token list -> 'a cE -> int;
       gotoT : token list -> 'a cT -> int;
@@ -187,8 +187,8 @@ struct
       gotoF = s0_gotoF;
     } 
   and s0_action = fun tl stack -> match peek tl with
-    | KInt x -> s5_action (rest tl) (SI (stack, s0, x))
-    | KLeft -> s4_action (rest tl) (SL (stack, s0))
+    | KInt x -> s5_action (rest tl) (stack, s0, x)
+    | KLeft -> s4_action (rest tl) (stack, s0)
   and s0_gotoE tl stack = s1_action tl stack
   and s0_gotoT : token list -> empty cT -> int = fun tl stack ->
       s2_action tl stack
@@ -200,8 +200,8 @@ struct
       gotoF = failure;
     }
   and s1_action = fun tl stack -> match peek tl with
-    | KPlus -> s6_action (rest tl) (SP (stack, s1))
-    | EOF -> let SE (stack, s, v) = stack in v
+    | KPlus -> s6_action (rest tl) (stack, s1)
+    | EOF -> let  (stack, s, v) = stack in v
 
   and s2  : 'a. 'a cT stateR = {
       gotoE = failure;
@@ -210,13 +210,13 @@ struct
     } 
   and s2_action : type a. token list -> a cT -> int = fun tl stack -> match peek tl with
     | KPlus ->
-      let ST (stack, s, v) = stack in gotoE s tl (SE (stack, s, v))
+      let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
     | KStar ->
-      s7_action (rest tl) (SS (stack, s2))
+      s7_action (rest tl) (stack, s2)
     | KRight ->
-      let ST (stack, s, v) = stack in gotoE s tl (SE (stack, s, v))
+      let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
     | EOF ->
-      let ST (stack, s, v) = stack in gotoE s tl (SE (stack, s, v))
+      let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
 
   and s3  : 'a. 'a cF stateR = {
       gotoE = failure;
@@ -225,13 +225,13 @@ struct
     } 
   and s3_action : type a. token list -> a cF -> int = fun tl stack -> match peek tl with
     | KPlus ->
-      let SF (stack, s, v) = stack in gotoT s tl (ST (stack, s, v))
+      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
     | KStar ->
-      let SF (stack, s, v) = stack in gotoT s tl (ST (stack, s, v))
+      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
     | KRight ->
-      let SF (stack, s, v) = stack in gotoT s tl (ST (stack, s, v))
+      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
     | EOF ->
-      let SF (stack, s, v) = stack in gotoT s tl (ST (stack, s, v))
+      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
 
   and s4  : 'a. 'a cL stateR = {
       gotoE = s4_gotoE;
@@ -239,8 +239,8 @@ struct
       gotoF = s4_gotoF;
     } 
   and s4_action : type a. token list -> a cL -> int = fun tl stack -> match peek tl with
-    | KInt x -> s5_action (rest tl) (SI (stack, s4, x))
-    | KLeft -> s4_action (rest tl) (SL (stack, s4))
+    | KInt x -> s5_action (rest tl) (stack, s4, x)
+    | KLeft -> s4_action (rest tl) (stack, s4)
   and s4_gotoE : type a. token list -> a cL cE -> int = fun tl stack ->
       s8_action tl stack
   and s4_gotoT : type a. token list -> a cL cT -> int = fun tl stack ->
@@ -254,21 +254,21 @@ struct
     } 
   and s5_action : type a. token list -> a cI -> int = fun tl stack -> match peek tl with
     | KPlus ->
-      let SI (stack, s, v) = stack in gotoF s tl (SF (stack, s, v))
+      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
     | KStar ->
-      let SI (stack, s, v) = stack in gotoF s tl (SF (stack, s, v))
+      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
     | KRight ->
-      let SI (stack, s, v) = stack in gotoF s tl (SF (stack, s, v))
+      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
     | EOF ->
-      let SI (stack, s, v) = stack in gotoF s tl (SF (stack, s, v))
+      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
   and s6  : 'a. 'a cE cP stateR = {
       gotoE = failure;
       gotoT = s6_gotoT;
       gotoF = s6_gotoF;
     } 
   and s6_action : type a. token list -> a cE cP -> int = fun tl stack -> match peek tl with
-    | KInt x -> s5_action (rest tl) (SI (stack, s6, x))
-    | KLeft -> s4_action (rest tl) (SL (stack, s6))
+    | KInt x -> s5_action (rest tl) (stack, s6, x)
+    | KLeft -> s4_action (rest tl) (stack, s6)
   and s6_gotoT : type a. token list -> a cE cP cT -> int = fun tl stack ->
       s9_action tl stack
   and s6_gotoF : type a. token list -> a cE cP cF -> int = fun tl stack ->
@@ -280,8 +280,8 @@ struct
       gotoF = s7_gotoF;
     } 
   and s7_action : type a. token list -> a cT cS -> int = fun tl stack -> match peek tl with
-    | KInt x -> s5_action (rest tl) (SI (stack, s7, x))
-    | KLeft -> s4_action (rest tl) (SL (stack, s7))
+    | KInt x -> s5_action (rest tl) (stack, s7, x)
+    | KLeft -> s4_action (rest tl) (stack, s7)
   and s7_gotoF : type a. token list -> a cT cS cF -> int = fun tl stack ->
       s10_action tl stack
 
@@ -291,8 +291,8 @@ struct
       gotoF = failure;
     } 
   and s8_action : type a. token list -> a cL cE -> int = fun tl stack -> match peek tl with
-    | KPlus -> s6_action (rest tl) (SP (stack, s8))
-    | KRight -> s11_action (rest tl) (SR (stack, s8))
+    | KPlus -> s6_action (rest tl) (stack, s8)
+    | KRight -> s11_action (rest tl) (stack, s8)
 
   and s9  : 'a. 'a cE cP cT stateR = {
       gotoE = failure;
@@ -301,17 +301,17 @@ struct
     } 
   and s9_action : type a. token list -> a cE cP cT -> int = fun tl stack -> match peek tl with
     | KPlus ->
-      let ST (SP (SE (stack, s, x), _), _, y) = stack in
-      let stack = SE (stack, s, x + y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x + y) in
       gotoE s tl stack
-    | KStar -> s7_action (rest tl) (SS (stack, s9))
+    | KStar -> s7_action (rest tl) (stack, s9)
     | KRight ->
-      let ST (SP (SE (stack, s, x), _), _, y) = stack in
-      let stack = SE (stack, s, x + y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x + y) in
       gotoE s tl stack
     | EOF ->
-      let ST (SP (SE (stack, s, x), _), _, y) = stack in
-      let stack = SE (stack, s, x + y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x + y) in
       gotoE s tl stack
 
   and s10 : 'a. 'a cT cS cF stateR = {
@@ -321,20 +321,20 @@ struct
     } 
   and s10_action : type a. token list -> a cT cS cF -> int = fun tl stack -> match peek tl with
     | KPlus ->
-      let SF (SS (ST (stack, s, x), _), _, y) = stack in
-      let stack = ST (stack, s, x * y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x * y) in
       gotoT s tl stack
     | KStar ->
-      let SF (SS (ST (stack, s, x), _), _, y) = stack in
-      let stack = ST (stack, s, x * y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x * y) in
       gotoT s tl stack
     | KRight ->
-      let SF (SS (ST (stack, s, x), _), _, y) = stack in
-      let stack = ST (stack, s, x * y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x * y) in
       gotoT s tl stack
     | EOF ->
-      let SF (SS (ST (stack, s, x), _), _, y) = stack in
-      let stack = ST (stack, s, x * y) in
+      let  ( ( (stack, s, x), _), _, y) = stack in
+      let stack =  (stack, s, x * y) in
       gotoT s tl stack
 
   and s11 : 'a. 'a cL cE cR stateR = {
@@ -344,20 +344,20 @@ struct
     } 
   and s11_action : type a. token list -> a cL cE cR -> int = fun tl stack -> match peek tl with
     | KPlus ->
-      let SR (SE (SL (stack, s), _, v), _) = stack in
-      let stack = SF (stack, s, v) in
+      let  ( ( (stack, s), _, v), _) = stack in
+      let stack =  (stack, s, v) in
       gotoF s tl stack
     | KStar ->
-      let SR (SE (SL (stack, s), _, v), _) = stack in
-      let stack = SF (stack, s, v) in
+      let  ( ( (stack, s), _, v), _) = stack in
+      let stack =  (stack, s, v) in
       gotoF s tl stack
     | KRight ->
-      let SR (SE (SL (stack, s), _, v), _) = stack in
-      let stack = SF (stack, s, v) in
+      let  ( ( (stack, s), _, v), _) = stack in
+      let stack =  (stack, s, v) in
       gotoF s tl stack
     | EOF ->
-      let SR (SE (SL (stack, s), _, v), _) = stack in
-      let stack = SF (stack, s, v) in
+      let  ( ( (stack, s), _, v), _) = stack in
+      let stack =  (stack, s, v) in
       gotoF s tl stack
 end
 
