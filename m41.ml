@@ -209,13 +209,9 @@ struct
       gotoF = failure;
     } 
   and s2_action : type a. token list -> a cT -> int = fun tl stack -> match peek tl with
-    | KPlus ->
-      let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
     | KStar ->
       s7_action (rest tl) (stack, s2)
-    | KRight ->
-      let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
-    | EOF ->
+    | KPlus | KRight | EOF ->
       let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
 
   and s3  : 'a. 'a cF stateR = {
@@ -224,13 +220,7 @@ struct
       gotoF = failure;
     } 
   and s3_action : type a. token list -> a cF -> int = fun tl stack -> match peek tl with
-    | KPlus ->
-      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
-    | KStar ->
-      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
-    | KRight ->
-      let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
-    | EOF ->
+    | KPlus|KStar|KRight|EOF ->
       let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
 
   and s4  : 'a. 'a cL stateR = {
@@ -253,13 +243,7 @@ struct
       gotoF = failure;
     } 
   and s5_action : type a. token list -> a cI -> int = fun tl stack -> match peek tl with
-    | KPlus ->
-      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
-    | KStar ->
-      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
-    | KRight ->
-      let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
-    | EOF ->
+    | KPlus | KStar | KRight | EOF ->
       let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
   and s6  : 'a. 'a cE cP stateR = {
       gotoE = failure;
@@ -300,19 +284,11 @@ struct
       gotoF = failure;
     } 
   and s9_action : type a. token list -> a cE cP cT -> int = fun tl stack -> match peek tl with
-    | KPlus ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
+    | KPlus | KRight | EOF ->
+      let  (((stack, s, x), _), _, y) = stack in
       let stack =  (stack, s, x + y) in
       gotoE s tl stack
     | KStar -> s7_action (rest tl) (stack, s9)
-    | KRight ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
-      let stack =  (stack, s, x + y) in
-      gotoE s tl stack
-    | EOF ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
-      let stack =  (stack, s, x + y) in
-      gotoE s tl stack
 
   and s10 : 'a. 'a cT cS cF stateR = {
       gotoE = failure;
@@ -320,20 +296,8 @@ struct
       gotoF = failure;
     } 
   and s10_action : type a. token list -> a cT cS cF -> int = fun tl stack -> match peek tl with
-    | KPlus ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
-      let stack =  (stack, s, x * y) in
-      gotoT s tl stack
-    | KStar ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
-      let stack =  (stack, s, x * y) in
-      gotoT s tl stack
-    | KRight ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
-      let stack =  (stack, s, x * y) in
-      gotoT s tl stack
-    | EOF ->
-      let  ( ( (stack, s, x), _), _, y) = stack in
+    | KPlus | KStar | KRight | EOF ->
+      let  (((stack, s, x), _), _, y) = stack in
       let stack =  (stack, s, x * y) in
       gotoT s tl stack
 
@@ -343,20 +307,8 @@ struct
       gotoF = failure;
     } 
   and s11_action : type a. token list -> a cL cE cR -> int = fun tl stack -> match peek tl with
-    | KPlus ->
-      let  ( ( (stack, s), _, v), _) = stack in
-      let stack =  (stack, s, v) in
-      gotoF s tl stack
-    | KStar ->
-      let  ( ( (stack, s), _, v), _) = stack in
-      let stack =  (stack, s, v) in
-      gotoF s tl stack
-    | KRight ->
-      let  ( ( (stack, s), _, v), _) = stack in
-      let stack =  (stack, s, v) in
-      gotoF s tl stack
-    | EOF ->
-      let  ( ( (stack, s), _, v), _) = stack in
+    | KPlus | KStar | KRight | EOF ->
+      let  (((stack, s), _, v), _) = stack in
       let stack =  (stack, s, v) in
       gotoF s tl stack
 end
