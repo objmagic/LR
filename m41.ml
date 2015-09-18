@@ -182,16 +182,13 @@ struct
   let failure _ _ = assert false
 
   let rec s0  : empty stateR = {
-      gotoE = s0_gotoE;
-      gotoT = s0_gotoT;
-      gotoF = s0_gotoF;
+      gotoE = s2_action;
+      gotoT = s1_action;
+      gotoF = s3_action;
     } 
   and s0_action = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s0, x)
     | KLeft -> s4_action (rest tl) (stack, s0)
-  and s0_gotoE tl stack = s1_action tl stack
-  and s0_gotoT : token list -> empty cT -> int = s2_action
-  and s0_gotoF : token list -> empty cF -> int = s3_action
   and s1  : empty cE stateR = {
       gotoE = failure;
       gotoT = failure;
@@ -222,16 +219,13 @@ struct
       let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
 
   and s4  : 'a. 'a cL stateR = {
-      gotoE = s4_gotoE;
-      gotoT = s4_gotoT;
-      gotoF = s4_gotoF;
+      gotoE = s8_action;
+      gotoT = s2_action;
+      gotoF = s3_action;
     } 
   and s4_action : type a. token list -> a cL -> int = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s4, x)
     | KLeft -> s4_action (rest tl) (stack, s4)
-  and s4_gotoE : type a. token list -> a cL cE -> int = s8_action
-  and s4_gotoT : type a. token list -> a cL cT -> int = s2_action
-  and s4_gotoF : type a. token list -> a cL cF -> int = s3_action
   and s5  : 'a. 'a cI stateR = {
       gotoE = failure;
       gotoT = failure;
@@ -242,24 +236,21 @@ struct
       let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
   and s6  : 'a. 'a cE cP stateR = {
       gotoE = failure;
-      gotoT = s6_gotoT;
-      gotoF = s6_gotoF;
+      gotoT = s9_action;
+      gotoF = s3_action;
     } 
   and s6_action : type a. token list -> a cE cP -> int = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s6, x)
     | KLeft -> s4_action (rest tl) (stack, s6)
-  and s6_gotoT : type a. token list -> a cE cP cT -> int = s9_action
-  and s6_gotoF : type a. token list -> a cE cP cF -> int = s3_action
 
   and s7  : 'a. 'a cT cS stateR = {
       gotoE = failure;
       gotoT = failure;
-      gotoF = s7_gotoF;
+      gotoF = s10_action;
     } 
   and s7_action : type a. token list -> a cT cS -> int = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s7, x)
     | KLeft -> s4_action (rest tl) (stack, s7)
-  and s7_gotoF : type a. token list -> a cT cS cF -> int = s10_action
 
   and s8  : 'a. 'a cL cE stateR = {
       gotoE = failure;
