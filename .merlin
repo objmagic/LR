@@ -1,8 +1,4 @@
 B _build/
 S .
 
-PKG genlet
-
-EXT meta
-
-FLG -w -10
+FLG -w -10-8
