@@ -3,7 +3,6 @@
 type token =
   KPlus | KStar | KLeft | KRight | KEnd | KInt of int | EOF
 
-
 let peek = List.hd and rest = List.tl
 
 module GADT = struct
@@ -68,12 +67,8 @@ module GADT = struct
       | S4, KLeft -> action S4 (rest tl) (SL (stack, s))
       (* S5 *)
       | S5, KPlus ->
-         let local : type a. a cI -> int =
-            fun (type a) (stack : a cI) -> 
-             let SI ((stack : a), (s : a state), (v : int)) = (stack : a cI) in
-               gotoF (s : a state) tl (SF ((stack : a), (s : a state), (v : int)))
-             in
-            local stack
+        let SI (stack, s, v) = stack in
+        gotoF s tl (SF (stack, s, v))
       | S5, KStar ->
         let SI (stack, s, v) = stack in gotoF s tl (SF (stack, s, v))
       | S5, KRight ->
@@ -186,7 +181,6 @@ struct
   let gotoT {gotoT} = gotoT
   let gotoF {gotoF} = gotoF
 
-
   let failure _ _ = assert false
   let goto_failure = { gotoE = failure; gotoT = failure; gotoF = failure }
 
@@ -194,7 +188,7 @@ struct
       gotoE = s2_action;
       gotoT = s1_action;
       gotoF = s3_action;
-    } 
+    }
   and s0_action = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s0, x)
     | KLeft -> s4_action (rest tl) (stack, s0)
@@ -203,14 +197,14 @@ struct
     | KPlus -> s6_action (rest tl) (stack, s1)
     | EOF -> let  (stack, s, v) = stack in v
 
-  and s2  : 'a. 'a cT stateR = goto_failure 
+  and s2  : 'a. 'a cT stateR = goto_failure
   and s2_action : type a. token list -> a cT -> int = fun tl stack -> match peek tl with
     | KStar ->
       s7_action (rest tl) (stack, s2)
     | KPlus | KRight | EOF ->
       let  (stack, s, v) = stack in gotoE s tl (stack, s, v)
 
-  and s3  : 'a. 'a cF stateR = goto_failure 
+  and s3  : 'a. 'a cF stateR = goto_failure
   and s3_action : type a. token list -> a cF -> int = fun tl stack -> match peek tl with
     | KPlus|KStar|KRight|EOF ->
       let  (stack, s, v) = stack in gotoT s tl (stack, s, v)
@@ -219,12 +213,12 @@ struct
       gotoE = s8_action;
       gotoT = s2_action;
       gotoF = s3_action;
-    } 
+    }
   and s4_action : type a. token list -> a cL -> int = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s4, x)
     | KLeft -> s4_action (rest tl) (stack, s4)
 
-  and s5  : 'a. 'a cI stateR = goto_failure 
+  and s5  : 'a. 'a cI stateR = goto_failure
   and s5_action : type a. token list -> a cI -> int = fun tl stack -> match peek tl with
     | KPlus | KStar | KRight | EOF ->
       let  (stack, s, v) = stack in gotoF s tl (stack, s, v)
@@ -233,22 +227,22 @@ struct
       gotoE = failure;
       gotoT = s9_action;
       gotoF = s3_action;
-    } 
+    }
   and s6_action : type a. token list -> a cE cP -> int = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s6, x)
     | KLeft -> s4_action (rest tl) (stack, s6)
 
-  and s7  : 'a. 'a cT cS stateR = {goto_failure with gotoF = s10_action} 
+  and s7  : 'a. 'a cT cS stateR = {goto_failure with gotoF = s10_action}
   and s7_action : type a. token list -> a cT cS -> int = fun tl stack -> match peek tl with
     | KInt x -> s5_action (rest tl) (stack, s7, x)
     | KLeft -> s4_action (rest tl) (stack, s7)
 
-  and s8  : 'a. 'a cL cE stateR = goto_failure 
+  and s8  : 'a. 'a cL cE stateR = goto_failure
   and s8_action : type a. token list -> a cL cE -> int = fun tl stack -> match peek tl with
     | KPlus -> s6_action (rest tl) (stack, s8)
     | KRight -> s11_action (rest tl) (stack, s8)
 
-  and s9  : 'a. 'a cE cP cT stateR = goto_failure 
+  and s9  : 'a. 'a cE cP cT stateR = goto_failure
   and s9_action : type a. token list -> a cE cP cT -> int = fun tl stack -> match peek tl with
     | KPlus | KRight | EOF ->
       let  (((stack, s, x), _), _, y) = stack in
@@ -256,14 +250,14 @@ struct
       gotoE s tl stack
     | KStar -> s7_action (rest tl) (stack, s9)
 
-  and s10 : 'a. 'a cT cS cF stateR = goto_failure 
+  and s10 : 'a. 'a cT cS cF stateR = goto_failure
   and s10_action : type a. token list -> a cT cS cF -> int = fun tl stack -> match peek tl with
     | KPlus | KStar | KRight | EOF ->
       let  (((stack, s, x), _), _, y) = stack in
       let stack =  (stack, s, x * y) in
       gotoT s tl stack
 
-  and s11 : 'a. 'a cL cE cR stateR = goto_failure 
+  and s11 : 'a. 'a cL cE cR stateR = goto_failure
   and s11_action : type a. token list -> a cL cE cR -> int = fun tl stack -> match peek tl with
     | KPlus | KStar | KRight | EOF ->
       let  (((stack, s), _, v), _) = stack in
@@ -271,7 +265,8 @@ struct
       gotoF s tl stack
 end
 
-
+(* LALR(1) actually. We didn't use (one) lookhead to resolve
+   shift/reduce conflict *)
 module Stackless = struct
   
   (* E := id | E (E) *)
@@ -342,3 +337,107 @@ module Stackless = struct
     print_endline (expr_to_string expr)
 
 end
+
+(* First stackless LR(1) parser !!!
+   Grammar is from ASU86, 4.55 *)
+module StacklessM455 = struct
+
+  (*
+     S -> C C
+     C -> c C | d
+  *)
+
+  type token = C | D | EOF
+
+  type 'a parser = token list -> 'a
+  
+  type s = S1 of c * c
+  and c = C1 of c | C2
+
+  let rec s_to_string (S1 (c1, c2)) =
+    let cs1 = c_to_string c1 and cs2 = c_to_string c2 in
+    Printf.sprintf "(%s %s)" cs1 cs2
+  and c_to_string = function
+    | C1 c -> let s = c_to_string c in Printf.sprintf "(c %s)" s
+    | C2 -> "(d)"
+
+  let log = print_endline
+
+  let reduce_c1 : (c -> 'a parser) -> c -> 'a parser =
+    fun g c -> log "reducing c1"; g (C1 c)
+
+  let reduce_c2 : (c -> 'a parser) -> 'a parser =
+    fun g -> log "reducing c2"; g C2
+
+  let reduce_s1 : (s -> 'a parser) -> c -> c -> 'a parser =
+    fun g c1 c2 -> "reducing s1"; g (S1 (c1, c2))
+
+  let rec state0 : (s -> 'a parser) -> 'a parser = fun k ts ->
+    let rec gs v = state1 (k v) and gc v = state2 (reduce_s1 gs v) in
+    match ts with
+    | C :: tr -> state3 (reduce_c1 gc) tr
+    | D :: tr -> state4 (reduce_c2 gc) tr
+    | _ -> failwith "0: expecting C/D"
+
+  and state1 : 'a parser -> 'a parser = fun k ts ->
+    match ts with
+    | [EOF] -> k ts
+    | _ -> failwith "1: reducing only on EOF"
+
+  and state2 : (c -> 'a parser) -> 'a parser = fun k ts ->
+    let gc v = state5 (k v) in
+    match ts with
+    | C :: tr -> state6 (reduce_c1 gc) tr
+    | D :: tr -> state7 (reduce_c2 gc) tr
+    | _ -> failwith "2: expecting C/D"
+
+  and state3 : (c -> 'a parser) -> 'a parser = fun k ts ->
+    let gc v = state8 (k v) in
+    match ts with
+    | C :: tr -> state3 (reduce_c1 gc) tr
+    | D :: tr -> state4 (reduce_c2 gc) tr
+    | _ -> failwith "3: expecting C/D"
+
+  and state4 : 'a parser -> 'a parser = fun k ts ->
+    match ts with
+    | C :: tr -> log "4: reducing c"; k ts
+    | D :: tr -> log "4: reducing d"; k ts
+    | _ -> failwith "4: reducing only on C/D"
+
+  and state5 : 'a parser -> 'a parser = fun k ts ->
+    match ts with
+    | [EOF] -> k ts
+    | _ -> failwith "5: reducing only on EOF"
+
+  and state6 : (c -> 'a parser) -> 'a parser = fun k ts ->
+    let gc v = state9 (k v) in
+    match ts with
+    | C :: tr -> state6 (reduce_c1 gc) tr
+    | D :: tr -> state7 (reduce_c2 gc) tr
+    | _ -> failwith "6: expecting C/D"
+
+  and state7 : 'a parser -> 'a parser = fun k ts ->
+    match ts with
+    | [EOF] -> k ts
+    | _ -> failwith "7: reducing only on EOF"
+
+  and state8 : 'a parser -> 'a parser = fun k ts ->
+    match ts with
+    | C :: tr | D :: tr -> k ts
+    | _ -> failwith "8: reducing only on C/D"
+
+  and state9 : 'a parser -> 'a parser = fun k ts ->
+    match ts with
+    | [EOF] -> k ts
+    | _ -> failwith "9: reducing only on EOF"
+
+  let parse_s : s parser = state0 (fun e tl -> e)
+
+  let test1 () =
+    let token = [C; C; C; D; C; C; D; EOF] in
+    let s = parse_s token in
+    print_endline (s_to_string s)
+
+end
+
+let () = StacklessM455.test1 ()
