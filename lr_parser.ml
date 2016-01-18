@@ -7,19 +7,30 @@
 
 (* Note: it's actually impossible to have other kinds of token, like int token *)
 
-module Token = struct
+module type UDT = sig
+  
+  type t
   type eof
+  val compare : t -> t -> bool
+  val to_string :t -> string
+  val eof_to_string : string
+  
+end
+
+module Token (UserDefinedToken : UDT) = struct
+
+  module UDT = UserDefinedToken
 
   type _ token =
-    | Char : char -> char token
-    | Chars : char list -> char token
+    | Tk : UDT.t -> UDT.t token
     | Eps : unit token
-    | Eof : eof token
+    | Eof : UDT.eof token
+
+  let tok t = Tk t
 
   let compare_token : type a b. a token -> b token -> bool = fun l r ->
     match l, r with
-    | Char cx, Char cy -> cx = cy
-    | Chars clx, Chars cly -> clx = cly
+    | Tk t1, Tk t2 -> UDT.compare t1 t2
     | Eps, Eps -> true
     | Eof, Eof -> true
     | _ -> false
@@ -41,6 +52,7 @@ module Token = struct
       (compare_token h1 h2) && (compare_token_list t1 t2)
     | _, _ -> false
 
+  (* O(n^2) *)
   let combine_token_list : token_list -> token_list -> token_list = fun t1 t2 ->
     let rec non_exist l acc =
       match l with
@@ -52,65 +64,73 @@ module Token = struct
       | TCons (hd, tl) -> TCons (hd, (combine tl t2)) in
     combine (non_exist t1 TNil) t2
 
-  let token_list_length t =
-    let rec loop t acc =
-      match t with
-      | TNil -> acc
-      | TCons (_, tl) -> loop tl (acc + 1) in
-    loop t 0
+  type iter_tk = {iter: 'a. 'a token -> unit}
 
-  type iter_token = {f: 'a. 'a token -> unit}
+  type 'a fold_tk = {fold: 'b. 'b token -> 'a -> 'a}
 
   let rec iter_token_list l iter =
     match l with
     | TNil -> ()
-    | TCons (hd, tl) -> iter.f hd; iter_token_list tl iter
+    | TCons (hd, tl) -> iter.iter hd; iter_token_list tl iter
+
+  let rec fold_token_list l fold acc =
+    match l with
+    | TNil -> acc
+    | TCons (hd, tl) -> fold_token_list tl fold (fold.fold hd acc)
+
+  let token_list_length t =
+    let f = {fold = fun _ acc -> 1 + acc} in
+    fold_token_list t f 0
 
   let token_to_string : type a. a token -> string = fun t ->
     match t with
-    | Char c -> Char.escaped c
-    | Chars cl -> String.concat "," (List.map (fun c -> Char.escaped c) cl)
+    | Tk t -> UDT.to_string t
     | Eps -> "Epsilon"
-    | Eof -> "EOF"
+    | Eof -> UDT.eof_to_string
 
   let token_list_to_string tl =
-    let buf = Buffer.create 20 in
-    let iterf : type a. a token -> unit = fun t ->
-      let s = token_to_string t in
-      Buffer.add_string buf s in
-    iter_token_list tl {f=iterf};
-    Buffer.contents buf
+    let f = {fold = fun t acc -> token_to_string t :: acc} in
+    let strs = List.rev (fold_token_list tl f []) in
+    String.concat " " strs
 
 end
 
-include Token
+module CharToken = struct
+  type t = char
+  type eof
+  let compare c1 c2 = Char.compare c1 c2 = 0
+  let to_string t = String.make 1 t
+  let eof_to_string = "EOF"
+end
+
+include Token(CharToken)
+
 (* Define symbol and prod_rule as extensible types, so later we
    can redefine a constructor. Totally hack *)
 type _ symbol = ..
 type _ prod_rule = ..
-  
-type _ symbol +=
-  | T  : 'a token -> 'a symbol
-  | NT : 'a prod_rule list Lazy.t -> 'a symbol
 
+type _ symbol +=
+  | T  : 'a token -> 'a symbol                 (* Terminal *)
+  | NT : 'a prod_rule list Lazy.t -> 'a symbol (* Non-terminal *)
+
+(* production rule *)
 type _ prod_rule +=
   | SemAct : 'a -> 'a prod_rule
   | Appl   : ('a -> 'b) prod_rule * 'a symbol -> 'b prod_rule
 
-(* Type definition for syntax *)
+(* syntax *)
 type (_, _) syn =
   | SNil : ('a, 'a) syn
   | SCons  : 'c symbol * ('a, 'b) syn -> ('c -> 'a, 'b) syn
 
-(* Polymorphic function that iterates each symbol in syntax list *)
+(* iterates each symbol in symbol list *)
 type iter_syn = {iter : 'a. 'a symbol -> unit}
 
 let rec iter_syntax : type a b. iter_syn -> (a, b) syn -> unit = fun iter s ->
   match s with
   | SNil -> ()
   | SCons (hd, tl) -> iter.iter hd; iter_syntax iter tl
-
-
 
 (* Append symbol at the end of syntax list *)
 let rec snoc : type a b c. (a, c -> b) syn -> c symbol -> (a, b) syn =
@@ -122,7 +142,7 @@ let rec snoc : type a b c. (a, c -> b) syn -> c symbol -> (a, b) syn =
 (* 'a is the result type, 'b is the type of semantic function *)
 type ('a, 'b) ss = {semantic : 'b; syntax : ('b, 'a) syn}
 
-(* There is some problem with existential unpacking *)
+(* normalized Yacc rule *)
 type _ norm_prod_rule =
   | S : ('a, 'b) ss -> 'a norm_prod_rule
 
@@ -137,20 +157,26 @@ module SRMap = struct
   type 'a key = {
     k  : 'a prod_rule list;
     tag : 'a acc;
+    stamp: string;
     eq  : 'b. 'b acc -> ('a, 'b) equality option
   }
 
   type 'a value = 'a norm_prod_rule list
 
+  let stamp =
+    let i = ref 0 in
+    fun () -> incr i; Printf.sprintf "T%d" !i
+
   let fresh_key (type a) (w: a prod_rule list) : a key =
     let module M = struct type _ acc += T : a acc end in
     let eq : type b. b acc -> (a, b) equality option =
       function M.T -> Some Refl | _ -> None in
-    {k = w; tag = M.T; eq}
+    {k = w; tag = M.T; stamp = stamp (); eq}
 
   let gen rules =
     (fresh_key rules), rules
 
+  (* mapping from ['a key] to ['a value] *)
   type t =
     | SRNil : t
     | SRCons : 'a key * 'a value * t -> t
@@ -173,6 +199,8 @@ module SRMap = struct
 
 end
 
+exception Unnormalized_rule
+
 (* Redefine NT. Totally hack *)
 type _ symbol +=
   | NT : ('a SRMap.key * 'a prod_rule list) Lazy.t -> 'a symbol
@@ -182,7 +210,7 @@ let symbol_to_string : type a. a symbol -> string = fun s ->
   | T token -> token_to_string token
   | NT p ->
     let k, _ = Lazy.force p in
-    string_of_int (Hashtbl.hash k)
+    k.SRMap.stamp
   | _ -> assert false
 
 (* compare symbols *)
@@ -218,10 +246,7 @@ let normalize_rule_lists : type a. (a prod_rule list) -> (a norm_prod_rule list)
 let pure f = SemAct f
 let (<*>) a b = Appl (a, b)
 
-let exact c = T (Char c)
-let exact_one_of cs = T (Chars cs)
-
-let digit = exact_one_of ['0';'1';'2';'3';'4';'5';'6';'7';'8';'9']
+let exact c = T (Tk c)
 
 let build_srmap s =
   let srmap = ref (SRMap.empty) in
@@ -243,8 +268,12 @@ let build_srmap s =
   !srmap
 
 type (_, _) item =
-  | Item : 'c SRMap.key *
-           ('a, 'b) syn * ('b, 'c) syn * token_list -> ('a, 'c) item
+  | Item : 'c SRMap.key *   (* Key associated with item *)
+           ('a, 'b) syn *   (* symbols before dot *)
+           ('b, 'c) syn *   (* symbols after dot *)
+           token_list       (* look ahead *)
+           -> ('a, 'c) item
+
 
 let syn_to_string : type a b. (a, b) syn -> string = fun s ->
   let buf = Buffer.create 20 in
@@ -256,15 +285,14 @@ let syn_to_string : type a b. (a, b) syn -> string = fun s ->
 
 let item_to_string : type a b. (a, b) item -> string = fun item ->
   match item with
-  | Item (k, f, s, tl) ->
-    let s = Printf.sprintf "%s -> %s . %s [%s]"
+  | Item (k, fst, snd, tl) ->
+    Printf.sprintf "%s -> %s . %s [%s]"
     (string_of_int (Hashtbl.hash k))
-    (syn_to_string f)
-    (syn_to_string s)
+    (syn_to_string fst)
+    (syn_to_string snd)
     (match tl with
     | TNil -> "$"
-    | _ -> token_list_to_string tl) in s
-
+    | _ -> token_list_to_string tl)
 
 let rec compare_syns : type a b c d. (a, b) syn -> (c, d) syn -> bool = fun s1 s2 ->
   match s1, s2 with
@@ -274,6 +302,7 @@ let rec compare_syns : type a b c d. (a, b) syn -> (c, d) syn -> bool = fun s1 s
   | SCons (hdx, tlx), SCons (hdy, tly) ->
     compare_symbols hdx hdy && compare_syns tlx tly
 
+
 let compare_items : type a b c d. (a, b) item -> (c, d) item -> bool = fun s1 s2 ->
   match s1, s2 with
   | Item (k1, sx1, sy1, tlist1), Item (k2, sx2, sy2, tlist2) ->
@@ -282,6 +311,8 @@ let compare_items : type a b c d. (a, b) item -> (c, d) item -> bool = fun s1 s2
     | Some _ ->
       compare_syns sx1 sy1 && compare_syns sx2 sy2 && compare_token_list tlist1 tlist2
 
+
+(* Core LR(1) automata engine *)
 module ItemSet = struct
   (* Problem:
      S -> C {$1}
@@ -348,12 +379,14 @@ module ItemSet = struct
     rev_iter it s;
     Buffer.contents buf
 
+  exception Unpreprocessed_non_terminal_symbol
+
   let augment_start : type a b. a symbol -> SRMap.t -> SRMap.t * t = fun s env ->
     match s with
     | NT n as nt -> begin
       let k = fst (Lazy.force n) in
       match SRMap.find env k with
-      | None -> failwith "Unpreprocessed non-terminal symbol"
+      | None -> raise Unpreprocessed_non_terminal_symbol
       | Some r ->
         let hd_syn = SNil and tl_syn = SCons (nt, SNil) in
         let augmented_rules = [pure (fun x -> x) <*> nt] in
@@ -366,7 +399,7 @@ module ItemSet = struct
 
   let shift_dot : type a b. (a, b) item -> (a, b) item = fun item ->
     match item with
-    | Item (k, alpha, SNil, token_list) -> failwith "Invalid item"
+    | Item (k, alpha, SNil, token_list) -> failwith "Unable to shift dot: invalid item"
     | Item (k, alpha, SCons (hd, tl), token_list) ->
       Item (k, (snoc alpha hd), tl, token_list)
 
@@ -413,7 +446,7 @@ module ItemSet = struct
         | NT pair -> begin
           let k, _ = Lazy.force pair in
           match SRMap.find env k with
-          | None -> failwith "Unprocessed non-terminal"
+          | None -> raise Unpreprocessed_non_terminal_symbol
           | Some rules -> begin
             let first =
               match first_set tl env with
@@ -444,6 +477,11 @@ module ItemSet = struct
 
 end
 
+(*
+   S -> C C
+   C -> c C | d
+*)
+
 (* Grammar 4.55 from Aho's Dragon book *)
 type s = SS of c * c
 and c = C1 of char * c | C2 of char
@@ -454,52 +492,43 @@ and c = NT (lazy (SRMap.gen [
     (pure (fun ch c -> C1 (ch, c)) <*> exact 'c' <*> c);
     (pure (fun c -> C2 c) <*> exact 'd')]))
 
-(* Grammar 4.1 from Aho's Dragon book *)
-type e = E1 of e * t | E2 of t
-and t = T1 of t * f | T2 of f
-and f = F1 of e | F2 of int
-
-let rec e = NT (lazy (SRMap.gen ([
-  (pure (fun e t -> E1 (e, t)) <*> e <*> t);
-  (pure (fun t -> E2 t) <*> t)])))
-
-and t = NT (lazy (SRMap.gen([
-  (pure (fun t f -> T1 (t, f)) <*> t <*> f);
-  (pure (fun f -> T2 f) <*> f)])))
-
-and f = NT (lazy (SRMap.gen ([
-  (pure (fun _ e _ -> F1 e) <*> exact '(' <*> e <*> exact ')');
-  (pure (fun d -> F2 (int_of_char d)) <*> digit)])))
-
 module Test = struct
   
   let env = build_srmap s
 
+  (* [s_set] is kernel item set *)
   let env, s_set = ItemSet.augment_start s env
 
-  let s0 = ItemSet.closure s_set env
+  let s_first = ItemSet.closure s_set env
+  
+  let get_first () =
+    match s with
+    | NT p -> begin
+      let k, _ = Lazy.force p in
+      match SRMap.find env k with
+      | Some rules ->
+        let fold_f acc r =
+          match r with
+          | S ss -> combine_token_list acc (ItemSet.first_set ss.syntax env) in
+        List.fold_left fold_f TNil rules
+      | None -> failwith "Unpreprocessed non-terminal symbols"
+      end
+    | _ -> assert false
 
-  let print_s0 () = ItemSet.to_string s0 |> print_endline
-
-  module First_test = struct
-    let s_first = ItemSet.closure s_set env
-    
-    let get_first () =
-      match s with
-      | NT p -> begin
-        let k, _ = Lazy.force p in
-        match SRMap.find env k with
-        | Some rules ->
-          let fold_f acc r =
-            match r with
-            | S ss -> combine_token_list acc (ItemSet.first_set ss.syntax env) in
-          List.fold_left fold_f TNil rules
-        | None -> failwith "Unpreprocessed non-terminal symbols"
-        end
-      | _ -> assert false
-
-    let see () = get_first () |> token_list_to_string
-  end
+  let see () = get_first () |> token_list_to_string
 
 end
+
+(* Notes on challenges:
+
+   Not to mention all ugliness brought by CSP and let-rec-and generation,
+   what we are attempting to do constantly hits the limit of MetaOCaml or OCaml.
+
+   1. reduce function
+      say we have a function of form ``fun x y z -> x + y * z``.
+      we would like to generate a function ``f`` of form:
+     ``fun g x y z -> g (x + y * z)``
+
+*)
+
 

@@ -370,8 +370,9 @@ module StacklessM455 = struct
     fun g -> log "reducing c2"; g C2
 
   let reduce_s1 : (s -> 'a parser) -> c -> c -> 'a parser =
-    fun g c1 c2 -> "reducing s1"; g (S1 (c1, c2))
+    fun g c1 c2 -> log "reducing s1"; g (S1 (c1, c2))
 
+  (* the number of kernel items is the arity of the function *)
   let rec state0 : (s -> 'a parser) -> 'a parser = fun k ts ->
     let rec gs v = state1 (k v) and gc v = state2 (reduce_s1 gs v) in
     match ts with
@@ -400,8 +401,8 @@ module StacklessM455 = struct
 
   and state4 : 'a parser -> 'a parser = fun k ts ->
     match ts with
-    | C :: tr -> log "4: reducing c"; k ts
-    | D :: tr -> log "4: reducing d"; k ts
+    | C :: tr -> k ts
+    | D :: tr -> k ts
     | _ -> failwith "4: reducing only on C/D"
 
   and state5 : 'a parser -> 'a parser = fun k ts ->
@@ -433,11 +434,35 @@ module StacklessM455 = struct
 
   let parse_s : s parser = state0 (fun e tl -> e)
 
-  let test1 () =
-    let token = [C; C; C; D; C; C; D; EOF] in
-    let s = parse_s token in
-    print_endline (s_to_string s)
+  let test tokens =
+    try
+      let s = parse_s tokens in
+      Printf.printf "=== Result: %s ===\n" (s_to_string s)
+    with _ ->
+      print_endline "=== Error ==="
+
+  (*
+     S -> C C
+     C -> c C | d
+  *)
+
+  let test1 () = test [C; C; C; D; C; C; D; EOF]
+
+  let test2 () = test [D; D; EOF]
+
+  let test3 () = test [C; D; D; EOF]
+
+  let test4 () = test [C; D; C; D; EOF]
+
+  let test5 () = test [C; D; EOF]
+
+  let test6 () = test [C; C; EOF]
 
 end
 
 let () = StacklessM455.test1 ()
+let () = StacklessM455.test2 ()
+let () = StacklessM455.test3 ()
+let () = StacklessM455.test4 ()
+let () = StacklessM455.test5 ()
+let () = StacklessM455.test6 ()
