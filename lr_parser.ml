@@ -1,20 +1,20 @@
 (* A GADT that captures Yacc production rule
 
    e.g. E : X Y Z { sem_act }
-   
+
    this should have type (a -> b -> c -> d, d) syn
 *)
 
 (* Note: it's actually impossible to have other kinds of token, like int token *)
 
 module type UDT = sig
-  
+
   type t
   type eof
   val compare : t -> t -> bool
   val to_string :t -> string
   val eof_to_string : string
-  
+
 end
 
 module Token (UserDefinedToken : UDT) = struct
@@ -318,10 +318,10 @@ module ItemSet = struct
      S -> C {$1}
      C -> cd {$1}
      C -> efg {$1}
-     
+
      given "S : .C", we would like to compute closure.
      what should be the return type of the function?
-   
+
     we should return two items of different types.
      (char -> char -> char, char) item
      (char -> char -> char -> char, char) item
@@ -493,14 +493,14 @@ and c = NT (lazy (SRMap.gen [
     (pure (fun c -> C2 c) <*> exact 'd')]))
 
 module Test = struct
-  
+
   let env = build_srmap s
 
   (* [s_set] is kernel item set *)
   let env, s_set = ItemSet.augment_start s env
 
   let s_first = ItemSet.closure s_set env
-  
+
   let get_first () =
     match s with
     | NT p -> begin
@@ -519,6 +519,8 @@ module Test = struct
 
 end
 
+let () = print_endline (Test.see ())
+
 (* Notes on challenges:
 
    Not to mention all ugliness brought by CSP and let-rec-and generation,
@@ -528,7 +530,6 @@ end
       say we have a function of form ``fun x y z -> x + y * z``.
       we would like to generate a function ``f`` of form:
      ``fun g x y z -> g (x + y * z)``
+   2. pattern matching
 
 *)
-
-
