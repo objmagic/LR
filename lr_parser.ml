@@ -213,6 +213,7 @@ let symbol_to_string : type a. a symbol -> string = fun s ->
     k.SRMap.stamp
   | _ -> assert false
 
+(* very costly, should use hashtbl, maybe GADT hashtbl? *)
 (* compare symbols *)
 let compare_symbols : type a b. a symbol -> b symbol -> bool = fun s1 s2 ->
   match s1, s2 with
@@ -287,7 +288,7 @@ let item_to_string : type a b. (a, b) item -> string = fun item ->
   match item with
   | Item (k, fst, snd, tl) ->
     Printf.sprintf "%s -> %s . %s [%s]"
-    (string_of_int (Hashtbl.hash k))
+    (k.SRMap.stamp)
     (syn_to_string fst)
     (syn_to_string snd)
     (match tl with
@@ -345,6 +346,18 @@ module ItemSet = struct
 
   type iter_itemset = {iter : 'a 'b. ('a, 'b) item -> unit}
 
+  type 'c fold_itemset = {fold: 'a 'b. ('a, 'b) item -> 'c -> 'c}
+
+  let rec iter_is : t -> iter_itemset -> unit = fun s it ->
+    match s with
+    | INil -> ()
+    | ICons (hd, tl) -> it.iter hd; iter_is tl it
+
+  let rec fold_is : t -> 'c fold_itemset -> 'c -> 'c = fun s it acc ->
+    match s with
+    | INil -> acc
+    | ICons (hd, tl) -> fold_is tl it (it.fold hd acc)
+
   let add elt s =
     if mem elt s then s else ICons (elt, s)
 
@@ -359,11 +372,6 @@ module ItemSet = struct
 
   let union_all ss =
     List.fold_left union empty ss
-
-  let rec iter : iter_itemset -> t -> unit = fun it s ->
-    match s with
-    | INil -> ()
-    | ICons (hd, tl) -> it.iter hd; iter it tl
 
   let rec rev_iter : iter_itemset -> t -> unit = fun it s ->
     match s with
@@ -397,11 +405,18 @@ module ItemSet = struct
       end
     | _ -> failwith "Invalid symbol"
 
-  let shift_dot : type a b. (a, b) item -> (a, b) item = fun item ->
+  let shift_dot : type a b. (a, b) item -> (a, b) item option = fun item ->
     match item with
-    | Item (k, alpha, SNil, token_list) -> failwith "Unable to shift dot: invalid item"
+    | Item (k, alpha, SNil, token_list) -> None
+    | Item (k, alpha, SCons (hd, tl), token_list) ->
+      Some (Item (k, (snoc alpha hd), tl, token_list))
+
+  let shift_dot_exn : type a b. (a, b) item -> (a, b) item = fun item ->
+    match item with
+    | Item (k, alpha, SNil, token_list) -> assert false
     | Item (k, alpha, SCons (hd, tl), token_list) ->
       Item (k, (snoc alpha hd), tl, token_list)
+
 
   let rule_to_itemset : type a b. a norm_prod_rule -> a SRMap.key -> token_list -> t = fun r k tl ->
     match r with
@@ -475,6 +490,49 @@ module ItemSet = struct
       | _ as s -> loop (close_items s env) (union s acc) in
     loop (close_items set env) set
 
+  type translist =
+    | TNil : translist
+    | TCons : 's symbol * t * translist -> translist
+
+  let rec translist_to_string : translist -> string = fun l ->
+    let buf = Buffer.create 64 in
+    let rec loop = function
+      | TNil -> ()
+      | TCons (s, t, l) ->
+        let ss = Printf.sprintf "From %s to:\n" (symbol_to_string s) in
+        Buffer.add_string buf ss;
+        Buffer.add_string buf (to_string t);
+        Buffer.add_string buf "\n\n";
+        loop l in
+    loop l;
+    Buffer.contents buf
+
+  let rec add_item_to_translist : type a b. 's symbol -> (a, b) item -> translist -> translist =
+    fun s item l ->
+      match l with
+      | TNil -> TCons (s, singleton item, TNil)
+      | TCons (st, its, t) ->
+        if compare_symbols s st then
+          TCons (st, add item its, t)
+        else
+          TCons (st, its, add_item_to_translist s item t)
+
+  let build_tranl : t -> translist = fun its ->
+    let foldf : type a b. (a, b) item -> translist -> translist = fun it l ->
+      match it with
+      | Item (_, _, SCons (s, _), _) ->
+        add_item_to_translist s (shift_dot_exn it) l
+      | _ -> l in
+    fold_is its {fold=foldf} TNil
+
+  (* need memorization here! memo itemset!
+     But, this could be diabolically inefficient *)
+  let rec aug_transl : translist -> SRMap.t -> translist = fun l env ->
+    match l with
+    | TNil -> TNil
+    | TCons (s, t, tl) ->
+      TCons (s, closure t env, aug_transl tl env)
+
 end
 
 (*
@@ -517,9 +575,21 @@ module Test = struct
 
   let see () = get_first () |> token_list_to_string
 
+  let dump_s0 () = ItemSet.to_string s_first
+
+  let s0_transl =
+    ItemSet.aug_transl (ItemSet.build_tranl s_first) env
+
+  let dump_trans () = ItemSet.translist_to_string s0_transl
+
+
 end
 
 let () = print_endline (Test.see ())
+
+let () = print_endline (Test.dump_s0 ())
+
+let () = print_endline (Test.dump_trans ())
 
 (* Notes on challenges:
 
@@ -530,6 +600,18 @@ let () = print_endline (Test.see ())
       say we have a function of form ``fun x y z -> x + y * z``.
       we would like to generate a function ``f`` of form:
      ``fun g x y z -> g (x + y * z)``
-   2. pattern matching
+
+   2. pattern matching generation
+      plan: using nested if-then-else
+
+   3. performance problem
+      our code is complete type-safe, so all comparison
+      functions only tell you if two things are equal or not. This
+      means we cannot have tree-like data structure to do O(logN) operation.
+      e.g: ``compare_symbols`` can be very costly
+      Thought: maybe using some hash?
+
+   4. let-rec-and generation are almost solved by Jun Inoue and Oleg3.
+      Actually, using Jeremy's current approach is not bad
 
 *)
