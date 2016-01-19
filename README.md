@@ -1,6 +1,15 @@
 # LR
 explore different techniques to generate LR(k) parsing code
 
+``m41.ml`` -- hand-rolled parsers for ASU grammar 4.1 and 4.55. These
+parsers serve as references for how generated code should look like.
+
+``lr_parser.ml`` -- a type-safe LR(1) automata building engine. The idea is
+to build automata and interpret it to generate code (or we can generate on-the-fly).
+
+``genf1.ml`` -- some crazy code by Drup. It can be useful.
+
+
 # Methods
 
 * Normal approach
@@ -20,9 +29,15 @@ explore different techniques to generate LR(k) parsing code
 * Stackless LR(1) parser
   
   * An improvement to [Derivation of a Typed Functional LR Parser](http://www.cs.ox.ac.uk/ralf.hinze/publications/TypedLR.pdf)  
-    Stack is implicitly represented as continuation function. Since no explicit
+    Stack is implicitly represented as continuation function (CPS). Since no explicit
     stack data structure is present, it is possible to use MetaOCaml to generate
     parser.
+
+    Jeremy, Runhang (01/18/16):  
+    maybe can use direct style, which is much easier for us to generate code.
+    But if one state has two different reduce production rules, we can't turn
+    CPS to direct style. Frederic showed one state can have to different reduction
+    rules, so we can't have direct style :(
 
 # How-to
 
