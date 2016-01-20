@@ -217,9 +217,7 @@ type _ symbol +=
 let symbol_to_string : type a. a symbol -> string = fun s ->
   match s with
   | T token -> token_to_string token
-  | NT p ->
-    let k, _ = Lazy.force p in
-    k.SRMap.stamp
+  | NT (lazy ({SRMap.stamp}, _)) -> stamp
   | _ -> assert false
 
 (* very costly, should use hashtbl, maybe GADT hashtbl? *)
@@ -229,8 +227,7 @@ let equal_symbols : type a b. a symbol -> b symbol -> bool = fun s1 s2 ->
   | T t1 , T t2 -> equal_token t1 t2
   | T _ , NT _ -> false
   | NT _, T _ -> false
-  | NT p1 , NT p2 -> begin
-    let k1, _ = Lazy.force p1 and k2, _ = Lazy.force p2 in
+  | NT (lazy (k1,_)), NT (lazy (k2, _)) -> begin
     match SRMap.equal_keys k1 k2 with
     | Some _ -> true
     | None -> false
@@ -247,7 +244,7 @@ let rec split : type a. a prod_rule -> a norm_prod_rule = function
 
 let normalize_symbol: type a. a symbol -> a norm_prod_rule list = function
   | T _ as t -> [S {semantic= (fun x -> x); syntax = SCons (t, SNil)}]
-  | NT k_rules -> List.map split (snd (Lazy.force k_rules))
+  | NT (lazy (_, k_rules)) -> List.map split k_rules
   | _ -> assert false
 
 let normalize_rule_lists : type a. (a prod_rule list) -> (a norm_prod_rule list) = fun pl ->
@@ -263,8 +260,7 @@ let build_srmap s =
   let rec dfs : type a. a symbol -> unit = fun s ->
     match s with
     | T _ -> ()
-    | NT kr as nt -> begin
-      let k = fst (Lazy.force kr) in
+    | NT (lazy (k, _)) as nt -> begin
       match SRMap.find !srmap k with
       | Some _ -> ()
       | None -> begin
