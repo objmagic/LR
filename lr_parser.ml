@@ -146,10 +146,12 @@ type ('a, 'b) ss = {semantic : 'b; syntax : ('b, 'a) syn}
 type _ norm_prod_rule =
   | S : ('a, 'b) ss -> 'a norm_prod_rule
 
-(* [module SRMap] is an heterogeneous association list of [norm_prod_rule list] *)
+(* [module SRMap] is an heterogeneous map of [norm_prod_rule list] *)
 module SRMap = struct
 
   type _ acc = ..
+
+  type boxed_acc = Boxed_acc : _ acc -> boxed_acc
 
   type (_, _) equality =
     | Refl : ('a, 'a) equality
@@ -158,7 +160,8 @@ module SRMap = struct
     k  : 'a prod_rule list;
     tag : 'a acc;
     stamp: string;
-    eq  : 'b. 'b acc -> ('a, 'b) equality option
+    eq  : 'b. 'b acc -> ('a, 'b) equality option;
+    cmp : 'b. 'b acc -> ('a, 'b) Hmap.ordering;
   }
 
   type 'a value = 'a norm_prod_rule list
@@ -171,32 +174,38 @@ module SRMap = struct
     let module M = struct type _ acc += T : a acc end in
     let eq : type b. b acc -> (a, b) equality option =
       function M.T -> Some Refl | _ -> None in
-    {k = w; tag = M.T; stamp = stamp (); eq}
+    let cmp : type b. b acc -> (a, b) Hmap.ordering = function
+       M.T -> Hmap.EQ
+     | v when Boxed_acc M.T < Boxed_acc v -> Hmap.LT
+     | _ -> Hmap.GT
+    in
+    {k = w; tag = M.T; stamp = stamp (); eq; cmp}
 
   let gen rules =
     (fresh_key rules), rules
 
+  let compare_keys : 'a 'b. 'a key -> 'b key -> ('a, 'b) Hmap.ordering =
+    fun {cmp} {tag} -> cmp tag
+
   (* mapping from ['a key] to ['a value] *)
-  type t =
-    | SRNil : t
-    | SRCons : 'a key * 'a value * t -> t
+  module KVMap = Hmap.Make
+    (struct 
+       type 'a t = 'a key
+       type 'a value = 'a norm_prod_rule list
+       let compare l r = compare_keys l r
+     end)
+  type t = KVMap.t
 
   let equal_keys : 'a key -> 'b key -> ('a, 'b) equality option = fun k1 k2 ->
     k1.eq k2.tag
 
-  let rec find: type a. t -> a key -> a value option = fun l k ->
-    match l with
-    | SRNil -> None
-    | SRCons (k', v, tl) ->
-      match equal_keys k k' with
-      | None -> find tl k
-      | Some Refl -> Some v
+  let find: type a. t -> a key -> a value option =
+    fun map k -> KVMap.find k map
 
-  let rec add : type a. t -> a key -> a value -> t = fun l k v ->
-    SRCons (k, v, l)
+  let add : type a. t -> a key -> a value -> t =
+    fun map k v -> KVMap.add k v map
 
-  let empty = SRNil
-
+  let empty = KVMap.empty
 end
 
 exception Unnormalized_rule
