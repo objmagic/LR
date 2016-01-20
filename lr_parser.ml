@@ -11,7 +11,7 @@ module type UDT = sig
 
   type t
   type eof
-  val compare : t -> t -> bool
+  val equal : t -> t -> bool
   val to_string :t -> string
   val eof_to_string : string
 
@@ -28,9 +28,9 @@ module Token (UserDefinedToken : UDT) = struct
 
   let tok t = Tk t
 
-  let compare_token : type a b. a token -> b token -> bool = fun l r ->
+  let equal_token : type a b. a token -> b token -> bool = fun l r ->
     match l, r with
-    | Tk t1, Tk t2 -> UDT.compare t1 t2
+    | Tk t1, Tk t2 -> UDT.equal t1 t2
     | Eps, Eps -> true
     | Eof, Eof -> true
     | _ -> false
@@ -43,13 +43,13 @@ module Token (UserDefinedToken : UDT) = struct
     match l with
     | TNil -> false
     | TCons (hd, tl) ->
-      if compare_token t hd then true else exist t tl
+      if equal_token t hd then true else exist t tl
 
-  let rec compare_token_list : token_list -> token_list -> bool = fun l r ->
+  let rec equal_token_list : token_list -> token_list -> bool = fun l r ->
     match l, r with
     | TNil, TNil -> true
     | TCons (h1, t1), TCons (h2, t2) ->
-      (compare_token h1 h2) && (compare_token_list t1 t2)
+      (equal_token h1 h2) && (equal_token_list t1 t2)
     | _, _ -> false
 
   (* O(n^2) *)
@@ -98,7 +98,7 @@ end
 module CharToken = struct
   type t = char
   type eof
-  let compare c1 c2 = Char.compare c1 c2 = 0
+  let equal c1 c2 = Char.compare c1 c2 = 0
   let to_string t = String.make 1 t
   let eof_to_string = "EOF"
 end
@@ -181,14 +181,14 @@ module SRMap = struct
     | SRNil : t
     | SRCons : 'a key * 'a value * t -> t
 
-  let compare_keys : 'a key -> 'b key -> ('a, 'b) equality option = fun k1 k2 ->
+  let equal_keys : 'a key -> 'b key -> ('a, 'b) equality option = fun k1 k2 ->
     k1.eq k2.tag
 
   let rec find: type a. t -> a key -> a value option = fun l k ->
     match l with
     | SRNil -> None
     | SRCons (k', v, tl) ->
-      match compare_keys k k' with
+      match equal_keys k k' with
       | None -> find tl k
       | Some Refl -> Some v
 
@@ -215,14 +215,14 @@ let symbol_to_string : type a. a symbol -> string = fun s ->
 
 (* very costly, should use hashtbl, maybe GADT hashtbl? *)
 (* compare symbols *)
-let compare_symbols : type a b. a symbol -> b symbol -> bool = fun s1 s2 ->
+let equal_symbols : type a b. a symbol -> b symbol -> bool = fun s1 s2 ->
   match s1, s2 with
-  | T t1 , T t2 -> compare_token t1 t2
+  | T t1 , T t2 -> equal_token t1 t2
   | T _ , NT _ -> false
   | NT _, T _ -> false
   | NT p1 , NT p2 -> begin
     let k1, _ = Lazy.force p1 and k2, _ = Lazy.force p2 in
-    match SRMap.compare_keys k1 k2 with
+    match SRMap.equal_keys k1 k2 with
     | Some _ -> true
     | None -> false
     end
@@ -295,22 +295,22 @@ let item_to_string : type a b. (a, b) item -> string = fun item ->
     | TNil -> "$"
     | _ -> token_list_to_string tl)
 
-let rec compare_syns : type a b c d. (a, b) syn -> (c, d) syn -> bool = fun s1 s2 ->
+let rec equal_syns : type a b c d. (a, b) syn -> (c, d) syn -> bool = fun s1 s2 ->
   match s1, s2 with
   | SNil, SNil -> true
   | SCons (_, _), SNil -> false
   | SNil, SCons (_, _) -> false
   | SCons (hdx, tlx), SCons (hdy, tly) ->
-    compare_symbols hdx hdy && compare_syns tlx tly
+    equal_symbols hdx hdy && equal_syns tlx tly
 
 
-let compare_items : type a b c d. (a, b) item -> (c, d) item -> bool = fun s1 s2 ->
+let equal_items : type a b c d. (a, b) item -> (c, d) item -> bool = fun s1 s2 ->
   match s1, s2 with
   | Item (k1, sx1, sy1, tlist1), Item (k2, sx2, sy2, tlist2) ->
-    match SRMap.compare_keys k1 k2 with
+    match SRMap.equal_keys k1 k2 with
     | None -> false
     | Some _ ->
-      compare_syns sx1 sy1 && compare_syns sx2 sy2 && compare_token_list tlist1 tlist2
+      equal_syns sx1 sy1 && equal_syns sx2 sy2 && equal_token_list tlist1 tlist2
 
 
 (* Core LR(1) automata engine *)
@@ -342,7 +342,7 @@ module ItemSet = struct
     match s with
     | INil -> false
     | ICons (hd, tl) ->
-      if compare_items elt hd then true else mem elt tl
+      if equal_items elt hd then true else mem elt tl
 
   type iter_itemset = {iter : 'a 'b. ('a, 'b) item -> unit}
 
@@ -512,7 +512,7 @@ module ItemSet = struct
       match l with
       | TNil -> TCons (s, singleton item, TNil)
       | TCons (st, its, t) ->
-        if compare_symbols s st then
+        if equal_symbols s st then
           TCons (st, add item its, t)
         else
           TCons (st, its, add_item_to_translist s item t)
@@ -608,7 +608,7 @@ let () = print_endline (Test.dump_trans ())
       our code is complete type-safe, so all comparison
       functions only tell you if two things are equal or not. This
       means we cannot have tree-like data structure to do O(logN) operation.
-      e.g: ``compare_symbols`` can be very costly
+      e.g: ``equal_symbols`` can be very costly
       Thought: maybe using some hash?
 
    4. let-rec-and generation are almost solved by Jun Inoue and Oleg3.
