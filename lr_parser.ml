@@ -497,42 +497,6 @@ module ItemSet = struct
       | _ as s -> loop (close_items s env) (union s acc) in
     loop (close_items set env) set
 
-
-
-  (*
-
-  let rec translist_to_string : translist -> string = fun l ->
-    let buf = Buffer.create 64 in
-    let rec loop = function
-      | TNil -> ()
-      | TCons (Trans (sym, State (st, tl)), l) ->
-
-        let ss = Printf.sprintf "From %s to:\n" (symbol_to_string s) in
-        Buffer.add_string buf ss;
-        Buffer.add_string buf (to_string t);
-        Buffer.add_string buf "\n\n";
-        loop l in
-    loop l;
-    Buffer.contents buf
-
-
-  let build_tranl : t -> translist = fun its ->
-    let foldf : type a b. (a, b) item -> translist -> translist = fun it l ->
-      match it with
-      | Item (_, _, SCons (s, _), _) ->
-        add_item_to_translist s (shift_dot_exn it) l
-      | _ -> l in
-    fold_is its {fold=foldf} TNil
-
-  (* need memorization here! memo itemset!
-     But, this could be diabolically inefficient *)
-  let rec aug_transl : translist -> SRMap.t -> translist = fun l env ->
-    match l with
-    | TNil -> TNil
-    | TCons (s, t, tl) ->
-      TCons (s, closure t env, aug_transl tl env)
-      *)
-
 end
 
 module Automata = struct
@@ -551,6 +515,14 @@ module Automata = struct
 
   type t = state list
 
+  type iter_tranl = {iter: 's. 's trans -> unit}
+
+  let itertl : iter_tranl -> translist -> unit = fun it l ->
+    let rec loop = function
+      | TNil -> ()
+      | TCons (trans, l) -> it.iter trans; loop l in
+    loop l
+
   let exists is t =
     List.exists (fun {items = is'} -> ItemSet.compare is is') t
 
@@ -559,14 +531,6 @@ module Automata = struct
       Some (List.find (fun {items = is'} -> ItemSet.compare is is') t)
     with _ ->
       None
-
-(*
-  let singleton_state item =
-    {
-      items = ItemSet.singleton item;
-      trans = TNil;
-    }
-*)
 
   let rec add_item_to_translist : type a b. 's symbol -> (a, b) item -> translist -> translist =
     fun s item l ->
@@ -599,9 +563,8 @@ module Automata = struct
       | None ->
         TCons (Trans (s, {items = new_items; trans}), aug_transl l env am)
 
-
   let build_automata : ItemSet.t -> SRMap.t -> state * t = fun is env ->
-    let htb : (int, bool) Hashtbl.t = Hashtbl.create 64 in (* unsafe *)
+    let htb : (int, bool) Hashtbl.t = Hashtbl.create 64 in (* Hashtbl.hash ? *)
     let states : state list ref = ref [] in
     let rec visit s () =
       let {items; trans} = s in
@@ -611,24 +574,11 @@ module Automata = struct
         states := s :: !states;
         let new_trans = aug_transl (build_transl items) env !states in
         s.trans <- new_trans;
-        let rec loop = function
-          | TNil -> ()
-          | TCons (Trans (_, s), l) ->
-            visit s ();
-            loop l in
-        loop new_trans
+        itertl {iter = fun (Trans (_, s)) -> visit s ()} new_trans
       end in
     let s0 = {items = is; trans = TNil} in
     visit s0 ();
     s0, !states
-
-  type iter_tranl = {iter: 's. 's trans -> unit}
-
-  let itertl : iter_tranl -> translist -> unit = fun it l ->
-    let rec loop = function
-      | TNil -> ()
-      | TCons (trans, l) -> it.iter trans; loop l in
-    loop l
 
   let automata_to_string state =
     let htb : (int, int) Hashtbl.t = Hashtbl.create 64 in
@@ -643,7 +593,7 @@ module Automata = struct
       | Some _ -> ()
       | None -> begin
           hadd items;
-          itertl {iter= fun (Trans (_, st)) -> visit st ()} trans
+          itertl {iter = fun (Trans (_, st)) -> visit st ()} trans
         end in
     visit state ();
     let htb1 : (int, bool) Hashtbl.t = Hashtbl.create 64 in
@@ -654,20 +604,13 @@ module Automata = struct
         Hashtbl.add htb1 k true;
         Buffer.add_string buf (Printf.sprintf "State S%d:\n" (Hashtbl.find htb k));
         Buffer.add_string buf (ItemSet.to_string items);
-        let rec loop1 = function
-          | TNil -> ()
-          | TCons (Trans (sym, {items}), l) ->
-            Buffer.add_string buf (Printf.sprintf "from: %s to " (symbol_to_string sym));
-            Buffer.add_string buf (Printf.sprintf "S%d \n" (Hashtbl.find htb (Hashtbl.hash items)));
-            loop1 l in
-        loop1 trans;
+        let iter = (fun (Trans (sym, {items})) ->
+          Buffer.add_string buf (Printf.sprintf "from: %s to " (symbol_to_string sym));
+          Buffer.add_string buf (Printf.sprintf "S%d \n" (Hashtbl.find htb (Hashtbl.hash items)))) in
+        itertl {iter} trans;
         Buffer.add_string buf "---------\n";
-        let rec loop2 = function
-          | TNil -> ()
-          | TCons (Trans (_, st), l) ->
-            visit st ();
-            loop2 l in
-        loop2 trans
+        let iter = fun (Trans (_, st)) -> visit st () in
+        itertl {iter} trans
       end in
     visit state ();
     Buffer.contents buf
@@ -705,7 +648,6 @@ module Test = struct
 
   let dump () = print_endline ams
 
-  
 (*
 
   let get_first () =
