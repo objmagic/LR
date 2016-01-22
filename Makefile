@@ -1,16 +1,15 @@
 all: clean build
 
 OCAMLBUILD = ocamlbuild
-OCAMLC = metaocamlc
-TARGET = hlist.byte lr_parser.byte
+OCAMLC = ocamlc
+TARGET = hmap.byte lr_parser.byte
 TAGS = annot,bin_annot
-PKGS = genlet
 
 build:
-	$(OCAMLBUILD) -tag $(TAGS) -pkgs $(PKGS) -ocamlc $(OCAMLC) $(TARGET)
+	$(OCAMLBUILD) -tag $(TAGS) -ocamlc $(OCAMLC) $(TARGET)
 
 test:
-	$(OCAMLBUILD) -tag $(TAGS) -pkgs $(PKGS) -ocamlc $(OCAMLC) $(TESTTARGET)
+	$(OCAMLBUILD) -tag $(TAGS) -ocamlc $(OCAMLC) $(TESTTARGET)
 
 clean:
 	rm -rf *.cmi *.cmo *.out *.byte _build

@@ -11,7 +11,7 @@ module type UDT = sig
 
   type t
   type eof
-  val compare : t -> t -> bool
+  val equal : t -> t -> bool
   val to_string :t -> string
   val eof_to_string : string
 
@@ -28,9 +28,9 @@ module Token (UserDefinedToken : UDT) = struct
 
   let tok t = Tk t
 
-  let compare_token : type a b. a token -> b token -> bool = fun l r ->
+  let equal_token : type a b. a token -> b token -> bool = fun l r ->
     match l, r with
-    | Tk t1, Tk t2 -> UDT.compare t1 t2
+    | Tk t1, Tk t2 -> UDT.equal t1 t2
     | Eps, Eps -> true
     | Eof, Eof -> true
     | _ -> false
@@ -43,13 +43,13 @@ module Token (UserDefinedToken : UDT) = struct
     match l with
     | TNil -> false
     | TCons (hd, tl) ->
-      if compare_token t hd then true else exist t tl
+      if equal_token t hd then true else exist t tl
 
-  let rec compare_token_list : token_list -> token_list -> bool = fun l r ->
+  let rec equal_token_list : token_list -> token_list -> bool = fun l r ->
     match l, r with
     | TNil, TNil -> true
     | TCons (h1, t1), TCons (h2, t2) ->
-      (compare_token h1 h2) && (compare_token_list t1 t2)
+      (equal_token h1 h2) && (equal_token_list t1 t2)
     | _, _ -> false
 
   (* O(n^2) *)
@@ -98,7 +98,7 @@ end
 module CharToken = struct
   type t = char
   type eof
-  let compare c1 c2 = Char.compare c1 c2 = 0
+  let equal c1 c2 = Char.compare c1 c2 = 0
   let to_string t = String.make 1 t
   let eof_to_string = "EOF"
 end
@@ -146,10 +146,12 @@ type ('a, 'b) ss = {semantic : 'b; syntax : ('b, 'a) syn}
 type _ norm_prod_rule =
   | S : ('a, 'b) ss -> 'a norm_prod_rule
 
-(* [module SRMap] is an heterogeneous association list of [norm_prod_rule list] *)
+(* [module SRMap] is an heterogeneous map of [norm_prod_rule list] *)
 module SRMap = struct
 
   type _ acc = ..
+
+  type boxed_acc = Boxed_acc : _ acc -> boxed_acc
 
   type (_, _) equality =
     | Refl : ('a, 'a) equality
@@ -158,7 +160,8 @@ module SRMap = struct
     k  : 'a prod_rule list;
     tag : 'a acc;
     stamp: string;
-    eq  : 'b. 'b acc -> ('a, 'b) equality option
+    eq  : 'b. 'b acc -> ('a, 'b) equality option;
+    cmp : 'b. 'b acc -> ('a, 'b) Hmap.ordering;
   }
 
   type 'a value = 'a norm_prod_rule list
@@ -171,32 +174,38 @@ module SRMap = struct
     let module M = struct type _ acc += T : a acc end in
     let eq : type b. b acc -> (a, b) equality option =
       function M.T -> Some Refl | _ -> None in
-    {k = w; tag = M.T; stamp = stamp (); eq}
+    let cmp : type b. b acc -> (a, b) Hmap.ordering = function
+       M.T -> Hmap.EQ
+     | v when Boxed_acc M.T < Boxed_acc v -> Hmap.LT
+     | _ -> Hmap.GT
+    in
+    {k = w; tag = M.T; stamp = stamp (); eq; cmp}
 
   let gen rules =
     (fresh_key rules), rules
 
-  (* mapping from ['a key] to ['a value] *)
-  type t =
-    | SRNil : t
-    | SRCons : 'a key * 'a value * t -> t
+  let compare_keys : 'a 'b. 'a key -> 'b key -> ('a, 'b) Hmap.ordering =
+    fun {cmp} {tag} -> cmp tag
 
-  let compare_keys : 'a key -> 'b key -> ('a, 'b) equality option = fun k1 k2 ->
+  (* mapping from ['a key] to ['a value] *)
+  module KVMap = Hmap.Make
+    (struct 
+       type 'a t = 'a key
+       type 'a value = 'a norm_prod_rule list
+       let compare l r = compare_keys l r
+     end)
+  type t = KVMap.t
+
+  let equal_keys : 'a key -> 'b key -> ('a, 'b) equality option = fun k1 k2 ->
     k1.eq k2.tag
 
-  let rec find: type a. t -> a key -> a value option = fun l k ->
-    match l with
-    | SRNil -> None
-    | SRCons (k', v, tl) ->
-      match compare_keys k k' with
-      | None -> find tl k
-      | Some Refl -> Some v
+  let find: type a. t -> a key -> a value option =
+    fun map k -> KVMap.find k map
 
-  let rec add : type a. t -> a key -> a value -> t = fun l k v ->
-    SRCons (k, v, l)
+  let add : type a. t -> a key -> a value -> t =
+    fun map k v -> KVMap.add k v map
 
-  let empty = SRNil
-
+  let empty = KVMap.empty
 end
 
 exception Unnormalized_rule
@@ -208,21 +217,18 @@ type _ symbol +=
 let symbol_to_string : type a. a symbol -> string = fun s ->
   match s with
   | T token -> token_to_string token
-  | NT p ->
-    let k, _ = Lazy.force p in
-    k.SRMap.stamp
+  | NT (lazy ({SRMap.stamp}, _)) -> stamp
   | _ -> assert false
 
 (* very costly, should use hashtbl, maybe GADT hashtbl? *)
 (* compare symbols *)
-let compare_symbols : type a b. a symbol -> b symbol -> bool = fun s1 s2 ->
+let equal_symbols : type a b. a symbol -> b symbol -> bool = fun s1 s2 ->
   match s1, s2 with
-  | T t1 , T t2 -> compare_token t1 t2
+  | T t1 , T t2 -> equal_token t1 t2
   | T _ , NT _ -> false
   | NT _, T _ -> false
-  | NT p1 , NT p2 -> begin
-    let k1, _ = Lazy.force p1 and k2, _ = Lazy.force p2 in
-    match SRMap.compare_keys k1 k2 with
+  | NT (lazy (k1,_)), NT (lazy (k2, _)) -> begin
+    match SRMap.equal_keys k1 k2 with
     | Some _ -> true
     | None -> false
     end
@@ -238,7 +244,7 @@ let rec split : type a. a prod_rule -> a norm_prod_rule = function
 
 let normalize_symbol: type a. a symbol -> a norm_prod_rule list = function
   | T _ as t -> [S {semantic= (fun x -> x); syntax = SCons (t, SNil)}]
-  | NT k_rules -> List.map split (snd (Lazy.force k_rules))
+  | NT (lazy (_, k_rules)) -> List.map split k_rules
   | _ -> assert false
 
 let normalize_rule_lists : type a. (a prod_rule list) -> (a norm_prod_rule list) = fun pl ->
@@ -254,8 +260,7 @@ let build_srmap s =
   let rec dfs : type a. a symbol -> unit = fun s ->
     match s with
     | T _ -> ()
-    | NT kr as nt -> begin
-      let k = fst (Lazy.force kr) in
+    | NT (lazy (k, _)) as nt -> begin
       match SRMap.find !srmap k with
       | Some _ -> ()
       | None -> begin
@@ -295,22 +300,22 @@ let item_to_string : type a b. (a, b) item -> string = fun item ->
     | TNil -> "$"
     | _ -> token_list_to_string tl)
 
-let rec compare_syns : type a b c d. (a, b) syn -> (c, d) syn -> bool = fun s1 s2 ->
+let rec equal_syns : type a b c d. (a, b) syn -> (c, d) syn -> bool = fun s1 s2 ->
   match s1, s2 with
   | SNil, SNil -> true
   | SCons (_, _), SNil -> false
   | SNil, SCons (_, _) -> false
   | SCons (hdx, tlx), SCons (hdy, tly) ->
-    compare_symbols hdx hdy && compare_syns tlx tly
+    equal_symbols hdx hdy && equal_syns tlx tly
 
 
-let compare_item : type a b c d. (a, b) item -> (c, d) item -> bool = fun s1 s2 ->
+let equal_items : type a b c d. (a, b) item -> (c, d) item -> bool = fun s1 s2 ->
   match s1, s2 with
   | Item (k1, sx1, sy1, tlist1), Item (k2, sx2, sy2, tlist2) ->
-    match SRMap.compare_keys k1 k2 with
+    match SRMap.equal_keys k1 k2 with
     | None -> false
     | Some _ ->
-      compare_syns sx1 sy1 && compare_syns sx2 sy2 && compare_token_list tlist1 tlist2
+      equal_syns sx1 sy1 && equal_syns sx2 sy2 && equal_token_list tlist1 tlist2
 
 
 (* Core LR(1) automata engine *)
@@ -342,7 +347,7 @@ module ItemSet = struct
     match s with
     | INil -> false
     | ICons (hd, tl) ->
-      if compare_item elt hd then true else mem elt tl
+      if equal_items elt hd then true else mem elt tl
 
   type iter_itemset = {iter : 'a 'b. ('a, 'b) item -> unit}
 
@@ -539,7 +544,7 @@ module Automata = struct
         let state = {items = ItemSet.singleton item; trans = TNil} in
         TCons (Trans (s, state), TNil)
       | TCons (Trans(sym, state), t) ->
-        if compare_symbols s sym then
+        if equal_symbols s sym then
           let new_state = {state with items = ItemSet.add item state.items} in
           TCons (Trans (sym, new_state), t)
         else
@@ -701,7 +706,7 @@ let () = print_endline (Test.dump_trans ())
       our code is complete type-safe, so all comparison
       functions only tell you if two things are equal or not. This
       means we cannot have tree-like data structure to do O(logN) operation.
-      e.g: ``compare_symbols`` can be very costly
+      e.g: ``equal_symbols`` can be very costly
       Thought: maybe using some hash?
 
    4. let-rec-and generation are almost solved by Jun Inoue and Oleg3.
