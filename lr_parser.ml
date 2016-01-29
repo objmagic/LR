@@ -267,7 +267,6 @@ module ItemSet = struct
       (syn_to_string snd)
       (if Tok.is_empty tl then "$" else Tok.token_list_to_string tl)
 
-
   let rec compare_syns :
     type a b c d. (a, b) syn -> (c, d) syn -> (_, _) O.ordering = fun s1 s2 ->
       match s1, s2 with
@@ -288,7 +287,7 @@ module ItemSet = struct
     | Item (k1, sx1, sy1, t1), Item (k2, sx2, sy2, t2) ->
       match SRMap.compare_keys k1 k2 with
       | O.EQ -> begin
-        match compare_syns sx1 sy1, compare_syns sx2 sy2 with
+        match compare_syns sx1 sx2, compare_syns sy1 sy2 with
         | O.EQ, O.EQ -> begin
           let c = Tok.compare t1 t2 in
           if c = 0 then O.EQ else (if c < 0 then O.LT else O.GT)
@@ -424,48 +423,53 @@ end
 
 module Automata = struct
 
-  type state = ..  (* hack *)
-
-  module TransOrder = struct
-    type 'a t = 'a symbol
-    type 'a value = state
-    let compare = compare_symbols
+  module rec Trans : sig
+    module TransOrder : sig
+      type 'a t = 'a symbol
+      type 'a value = State.state
+      val compare : 'a symbol -> 'b symbol -> ('a, 'b) O.ordering
+    end
+    module Transitions : Hmap.S with type 'a key = 'a TransOrder.t
+                                 and type 'a value = 'a TransOrder.value
+  end = struct
+    module TransOrder = struct
+      type 'a t = 'a symbol
+      type 'a value = State.state
+      let compare = compare_symbols
+    end
+    module Transitions = Hmap.Make(TransOrder)
   end
 
-  module Transitions = Hmap.Make(TransOrder)
+  and State : sig
+    type state = {
+      items : ItemSet.t;
+      mutable trans : Trans.Transitions.t;
+    }
+  end = State
 
-  type s = {
-    items : ItemSet.t;
-    mutable trans : Transitions.t
-  }
-
-  type state += State of s
+  include Trans
+  include State
 
   module StateOrder = struct
     type t = state
-    let compare = fun s1 s2 ->
-      match s1, s2 with
-      | State s1, State s2 -> ItemSet.compare s1.items s2.items
-      | _, _ -> assert false
+    let compare s1 s2 = ItemSet.compare s1.items s2.items
   end
 
-  include Set.Make(StateOrder)
+  module Am = Set.Make(StateOrder)
 
-  let exists_items items' t = exists (fun k ->
-      match k with
-      | State s -> ItemSet.compare items' s.items = 0
-      | _ -> assert false)
+  let exists_items items' t = Am.exists (fun s ->
+      ItemSet.compare s.items items' = 0) t
 
   let rec add_item_to_transet :
     's symbol -> ('a, 'b) ItemSet.item -> Transitions.t -> Transitions.t =
     fun sym item ts ->
       match Transitions.find sym ts with
-      | Some (State state) -> begin
+      | Some state -> begin
           let new_items = ItemSet.add item state.items in
-          Transitions.add sym (State {state with items = new_items}) ts
+          Transitions.add sym {state with items = new_items} ts
         end
       | None -> begin
-        let state = State {
+        let state = {
             items = ItemSet.add item ItemSet.empty;
             trans = Transitions.empty;} in
         Transitions.add sym state ts
@@ -481,22 +485,18 @@ module Automata = struct
         | _ -> l in
     ItemSet.fold {ItemSet.fold} its Transitions.empty
 
-  let rec aug_transet : Transitions.t -> SRMap.t -> t -> Transitions.t =
+  let rec aug_transet : Transitions.t -> SRMap.t -> Am.t -> Transitions.t =
     fun l env am ->
       let fold sym state acc =
-        match state with
-        | State {items; trans} -> begin
-            let new_items = ItemSet.closure items env in
-            let phantom_set =
-              State {items = new_items; trans = Transitions.empty} in
-            try
-              let exist_set = find phantom_set am in
-              Transitions.add sym exist_set acc
-            with Not_found ->
-              let new_state = State {items = new_items; trans;} in
-              Transitions.add sym new_state acc
-          end
-        | _ -> assert false in
+        let {items; trans} = state in
+        let new_items = ItemSet.closure items env in
+        let phantom_set = {items = new_items; trans = Transitions.empty} in
+        try
+          let exist_set = Am.find phantom_set am in
+          Transitions.add sym exist_set acc
+        with Not_found ->
+          let new_state = {items = new_items; trans;} in
+          Transitions.add sym new_state acc in
       Transitions.fold {Transitions.fold} l Transitions.empty
       (* The above line looks really weird, isn't it? *)
 
@@ -505,29 +505,22 @@ module Automata = struct
       let compare = ItemSet.compare
     end)
 
-  let build_automata : ItemSet.t -> SRMap.t -> state * t = fun is env ->
-    let states = ref empty in
-    let visited = ref ItemSetSet.empty in
-    let rec visit s () =
-      match s with
-      | State state -> begin
-          let {items; trans} = state in
-          if ItemSetSet.mem items !visited then () else begin
-            visited := ItemSetSet.add items !visited;
-            states := add s !states;
-            let new_trans = aug_transet (build_transet items) env !states in
-            state.trans <- new_trans;
-            let iter : type a. a symbol -> state -> unit = fun _ s' ->
-              visit s' () in
-            Transitions.iter {Transitions.iter} new_trans
-          end
-        end
-      | _ -> assert false in
-    let s0 = State {items = is; trans = Transitions.empty} in
+  let build_automata : ItemSet.t -> SRMap.t -> state * Am.t = fun is env ->
+    let states = ref Am.empty in
+    let rec visit state () =
+      let {items; trans} = state in
+      if exists_items items !states then () else begin
+        states := Am.add state !states;
+        let new_trans = aug_transet (build_transet items) env !states in
+        state.trans <- new_trans;
+        let iter : type a. a symbol -> state -> unit = fun _ s' ->
+          visit s' () in
+        Transitions.iter {Transitions.iter} new_trans
+      end in
+    let s0 = {items = is; trans = Transitions.empty} in
     visit s0 ();
     s0, !states
 
-  (*
   let automata_to_string state =
     let htb : (int, int) Hashtbl.t = Hashtbl.create 64 in
     let hadd, hlookup =
@@ -541,7 +534,9 @@ module Automata = struct
       | Some _ -> ()
       | None -> begin
           hadd items;
-          itertl {iter = fun (Trans (_, st)) -> visit st ()} trans
+          let iter : type a. a symbol -> state -> unit =
+            fun _ st -> visit st () in
+          Transitions.iter {Transitions.iter} trans
         end in
     visit state ();
     let htb1 : (int, bool) Hashtbl.t = Hashtbl.create 64 in
@@ -552,17 +547,20 @@ module Automata = struct
         Hashtbl.add htb1 k true;
         Buffer.add_string buf (Printf.sprintf "State S%d:\n" (Hashtbl.find htb k));
         Buffer.add_string buf (ItemSet.to_string items);
-        let iter = (fun (Trans (sym, {items})) ->
+        let iter : type s. s symbol -> state -> unit = fun sym state ->
+          let items = state.items in
           Buffer.add_string buf (Printf.sprintf "from: %s to " (symbol_to_string sym));
-          Buffer.add_string buf (Printf.sprintf "S%d \n" (Hashtbl.find htb (Hashtbl.hash items)))) in
-        itertl {iter} trans;
-        Buffer.add_string buf "---------\n";
-        let iter = fun (Trans (_, st)) -> visit st () in
-        itertl {iter} trans
-      end in
+          Buffer.add_string buf (Printf.sprintf "S%d \n" (Hashtbl.find htb (Hashtbl.hash items)))
+      in
+      Transitions.iter {Transitions.iter} trans;
+      Buffer.add_string buf "---------\n";
+      let iter : type a. a symbol -> state -> unit =
+        fun _ st -> visit st () in
+      Transitions.iter {Transitions.iter} trans
+      end
+      in
     visit state ();
     Buffer.contents buf
-  *)
 
 end
 
@@ -594,13 +592,11 @@ module Test = struct
 
   let s0, states = Automata.build_automata s_first env
 
-(*
-  let ams = Automata.automata_to_string s0
-
-  let dump () = print_endline ams
-*)
+  let ams () = Automata.automata_to_string s0
 
 end
+
+let () = print_endline (Test.ams ())
 
 
 (* Notes on challenges:

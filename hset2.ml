@@ -106,11 +106,13 @@ struct
    fun x -> function
       Empty ->
         false
-    | Node(l, v, r, _) ->
+    | Node(l, v, r, _) -> begin
         match Ord.compare x v with
         Ordering.EQ -> true
-      | Ordering.LT -> mem x l
-      | Ordering.GT -> mem x r
+        | Ordering.LT -> mem x l
+        | Ordering.GT -> mem x r
+        end
+
 
   let singleton : type a b. (a, b) elem -> t = fun k ->
       Node (Empty, k, Empty, 1)
@@ -191,28 +193,32 @@ struct
     | Empty -> acc
     | Node (l, v, r, _) -> fold fd r (fd.fold v (fold fd l acc))
 
-  type enumeration =
-    | End
-    | More : ('a, 'b) elem * t * enumeration -> enumeration
+  (* basically, the following two functions are fucked up *)
 
-  let rec cons_enum s e =
-    match s with
-    | Empty -> e
-    | Node (l, v, r, _) -> cons_enum l (More (v, r, e))
-
-  let rec compare_aux : enumeration -> enumeration -> int =
-    fun e1 e2 ->
-    match e1, e2 with
-    | End, End -> 0
-    | End, _ -> -1
-    | _, End -> 1
-    | More (v1, r1, e1), More (v2, r2, e2) ->
+  let rec subset s1 s2 =
+    match s1, s2 with
+    | Empty, _ -> true
+    | _, Empty -> false
+    | Node (l1, v1, r1, _), (Node (l2, v2, r2, _) as t2) -> begin
       match Ord.compare v1 v2 with
-      | Ordering.EQ -> compare_aux (cons_enum r1 e1) (cons_enum r2 e2)
-      | Ordering.LT -> -1
-      | _ -> 1
+      | Ordering.EQ -> subset l1 l2 && subset r1 r2
+      | Ordering.LT -> subset (Node (l1, v1, Empty, 0)) l2 && subset r1 t2
+      | Ordering.GT -> subset (Node (Empty, v1, r1, 0)) r2 && subset l1 t2
+      end
 
-  let compare s1 s2 = compare_aux (cons_enum s1 End) (cons_enum s2 End)
+  (* this is how normies compare two sets, damn! *)
+  let compare s1 s2 =
+    let f1: type a b. (a, b) elem -> bool -> bool =
+      fun e accb -> accb && mem e s1 in
+    let f2: type a b. (a, b) elem -> bool -> bool =
+      fun e accb -> accb && mem e s2 in
+    let b1 = fold {fold = f1} s2 true in
+    let b2 = fold {fold = f2} s1 true in
+    match b1, b2 with
+    | true, true -> 0
+    | true, false -> 1
+    | false, true -> -1
+    | false, false -> 1
 
 end
 
