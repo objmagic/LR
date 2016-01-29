@@ -78,47 +78,160 @@ module Tok = Token(CharToken)
 
 (* Define symbol and prod_rule as extensible types, so later we
    can redefine a constructor. Totally hack *)
-type _ symbol = ..
-type _ prod_rule = ..
 
-type _ symbol +=
-  | T  : 'a Tok.token -> 'a symbol                 (* Terminal *)
-  | NT : 'a prod_rule list Lazy.t -> 'a symbol (* Non-terminal *)
+module rec Symbol : sig
+  type 'a symbol =
+    | T : 'a Tok.token -> 'a symbol
+    | NT : ('a SRMap.key * 'a Rules.prod_rule list) Lazy.t -> 'a symbol
 
-(* production rule *)
-type _ prod_rule +=
-  | SemAct : 'a -> 'a prod_rule
-  | Appl   : ('a -> 'b) prod_rule * 'a symbol -> 'b prod_rule
+  val symbol_to_string : 'a symbol -> string
+  val compare_symbols : 'a symbol -> 'b symbol -> ('a, 'b) O.ordering
+  val normalize_symbol : 'a symbol -> 'a Rules.norm_prod_rule list
+  val build_srmap : 'a symbol -> SRMap.t
+end = struct
 
-(* syntax *)
-type (_, _) syn =
-  | SNil : ('a, 'a) syn
-  | SCons  : 'c symbol * ('a, 'b) syn -> ('c -> 'a, 'b) syn
+  type 'a symbol =
+    | T : 'a Tok.token -> 'a symbol
+    | NT : ('a SRMap.key * 'a Rules.prod_rule list) Lazy.t -> 'a symbol
 
-(* iterates each symbol in symbol list *)
-type iter_syn = {iter : 'a. 'a symbol -> unit}
+  type sbox = SymBox : 'a symbol -> sbox
 
-let rec iter_syntax : type a b. iter_syn -> (a, b) syn -> unit = fun iter s ->
-  match s with
-  | SNil -> ()
-  | SCons (hd, tl) -> iter.iter hd; iter_syntax iter tl
+  let symbol_to_string : type a. a symbol -> string = fun s ->
+    match s with
+    | T token -> Tok.token_to_string token
+    | NT (lazy (k, _)) -> SRMap.string_of_key k
+  
+  let compare_symbols : type a b. a symbol -> b symbol -> (a, b) O.ordering = fun s1 s2 ->
+    match s1, s2 with
+    | T t1 , T t2 -> Tok.compare_token t1 t2
+    | NT (lazy (k1,_)), NT (lazy (k2, _)) -> SRMap.compare_keys k1 k2
+    | T _, NT _ -> O.LT
+    | _ -> O.GT
 
-(* Append symbol at the end of syntax list *)
-let rec snoc : type a b c. (a, c -> b) syn -> c symbol -> (a, b) syn =
-  fun l sym ->
-    match l with
-    | SNil -> SCons (sym, SNil)
-    | SCons (sym', rhs) -> SCons (sym', snoc rhs sym)
+  let normalize_symbol: type a. a symbol -> a Rules.norm_prod_rule list = function
+    | T _ as t -> [Rules.S {Rules.semantic= (fun x -> x);
+                            syntax = Syntax.SCons (t, Syntax.SNil)}]
+    | NT (lazy (_, k_rules)) -> List.map Rules.split k_rules
 
-(* 'a is the result type, 'b is the type of semantic function *)
-type ('a, 'b) ss = {semantic : 'b; syntax : ('b, 'a) syn}
+  let build_srmap s =
+    let srmap = ref (SRMap.empty) in
+    let rec dfs : type a. a symbol -> unit = fun s ->
+      match s with
+      | T _ -> ()
+      | NT (lazy (k, _)) as nt -> begin
+        match SRMap.find !srmap k with
+        | Some _ -> ()
+        | None -> begin
+          let npr = normalize_symbol nt in
+          srmap := SRMap.add !srmap k npr;
+          List.iter (fun (Rules.S s) -> Syntax.iter_syntax {Syntax.iter = dfs} s.Rules.syntax) npr
+          end
+        end in
+    dfs s;
+    !srmap
 
-(* normalized Yacc rule *)
-type _ norm_prod_rule =
-  | S : ('a, 'b) ss -> 'a norm_prod_rule
+end
+
+and Syntax : sig
+  type (_, _) syn =
+    | SNil : ('a, 'a) syn
+    | SCons  : 'c Symbol.symbol * ('a, 'b) syn -> ('c -> 'a, 'b) syn
+
+  type iter_syn = {iter : 'a. 'a Symbol.symbol -> unit}
+
+  val iter_syntax : iter_syn -> ('a, 'b) syn -> unit
+
+  val snoc : ('a, 'c -> 'b) syn -> 'c Symbol.symbol -> ('a, 'b) syn
+
+  val syn_to_string: ('a, 'b) syn -> string
+
+end = struct
+
+  type (_, _) syn =
+    | SNil : ('a, 'a) syn
+    | SCons  : 'c Symbol.symbol * ('a, 'b) syn -> ('c -> 'a, 'b) syn
+
+  type iter_syn = {iter : 'a. 'a Symbol.symbol -> unit}
+
+  let rec iter_syntax : type a b. iter_syn -> (a, b) syn -> unit = fun iter s ->
+    match s with
+    | SNil -> ()
+    | SCons (hd, tl) -> iter.iter hd; iter_syntax iter tl
+
+  (* Append symbol at the end of syntax list *)
+  let rec snoc : type a b c. (a, c -> b) syn -> c Symbol.symbol -> (a, b) syn =
+    fun l sym ->
+      match l with
+      | SNil -> SCons (sym, SNil)
+      | SCons (sym', rhs) -> SCons (sym', snoc rhs sym)
+
+  let syn_to_string : type a b. (a, b) syn -> string = fun s ->
+    let buf = Buffer.create 20 in
+    let f s =
+      Buffer.add_string buf (Symbol.symbol_to_string s); Buffer.add_string buf " " in
+    let iter = {iter = f} in
+    iter_syntax iter s;
+    Buffer.contents buf
+
+end
+
+and Rules : sig
+
+  (* production rule *)
+  type _ prod_rule =
+    | SemAct : 'a -> 'a prod_rule
+    | Appl   : ('a -> 'b) prod_rule * 'a Symbol.symbol -> 'b prod_rule
+
+  (* 'a is the result type, 'b is the type of semantic function *)
+  type ('a, 'b) ss = {semantic : 'b; syntax : ('b, 'a) Syntax.syn}
+
+  (* normalized Yacc rule *)
+  type _ norm_prod_rule =
+    | S : ('a, 'b) ss -> 'a norm_prod_rule
+
+  val split : 'a prod_rule -> 'a norm_prod_rule
+
+  val normalize_rule_lists : 'a prod_rule list -> 'a norm_prod_rule list
+
+end = struct
+
+  (* production rule *)
+  type _ prod_rule =
+    | SemAct : 'a -> 'a prod_rule
+    | Appl   : ('a -> 'b) prod_rule * 'a Symbol.symbol -> 'b prod_rule
+
+  (* 'a is the result type, 'b is the type of semantic function *)
+  type ('a, 'b) ss = {semantic : 'b; syntax : ('b, 'a) Syntax.syn}
+
+  (* normalized Yacc rule *)
+  type _ norm_prod_rule =
+    | S : ('a, 'b) ss -> 'a norm_prod_rule
+
+  (* split semantic action and syntax from an applicative structure *)
+  let rec split : type a. a prod_rule -> a norm_prod_rule = function
+    | SemAct semantic -> S {semantic; syntax = Syntax.SNil}
+    | Appl (f, sym) ->
+      let S {semantic; syntax} = split f in
+      S {semantic; syntax = Syntax.snoc syntax sym}
+
+  let normalize_rule_lists : type a. (a prod_rule list) -> (a norm_prod_rule list) = fun pl ->
+    List.map split pl
+
+end
 
 (* [module SRMap] is an heterogeneous map of [norm_prod_rule list] *)
-module SRMap = struct
+and SRMap: sig
+  type t
+  type 'a key
+  type 'a value = 'a Rules.norm_prod_rule list
+  val fresh_key : 'a Rules.prod_rule list -> 'a key
+  val gen : 'a Rules.prod_rule list -> 'a key * 'a Rules.prod_rule list
+  val compare_keys : 'a key -> 'b key -> ('a, 'b) O.ordering
+  val string_of_key : 'a key -> string
+  val empty : t
+  val find : t -> 'a key -> 'a value option
+  val add : t -> 'a key -> 'a value -> t
+end = struct
 
   type _ acc = ..
 
@@ -128,20 +241,22 @@ module SRMap = struct
     | Refl : ('a, 'a) equality
 
   type 'a key = {
-    k  : 'a prod_rule list;
+    k  : 'a Rules.prod_rule list;
     tag : 'a acc;
     stamp: string;
     eq  : 'b. 'b acc -> ('a, 'b) equality option;
     cmp : 'b. 'b acc -> ('a, 'b) O.ordering;
   }
 
-  type 'a value = 'a norm_prod_rule list
+  type 'a value = 'a Rules.norm_prod_rule list
 
   let stamp =
     let i = ref 0 in
     fun () -> incr i; Printf.sprintf "T%d" !i
 
-  let fresh_key (type a) (w: a prod_rule list) : a key =
+  let string_of_key k = k.stamp
+
+  let fresh_key (type a) (w: a Rules.prod_rule list) : a key =
     let module M = struct type _ acc += T : a acc end in
     let eq : type b. b acc -> (a, b) equality option =
       function M.T -> Some Refl | _ -> None in
@@ -162,13 +277,10 @@ module SRMap = struct
   module KVMap = Hmap.Make
     (struct
        type 'a t = 'a key
-       type 'a value = 'a norm_prod_rule list
+       type 'a value = 'a Rules.norm_prod_rule list
        let compare l r = compare_keys l r
      end)
   type t = KVMap.t
-
-  let equal_keys : 'a key -> 'b key -> ('a, 'b) equality option = fun k1 k2 ->
-    k1.eq k2.tag
 
   let find: type a. t -> a key -> a value option =
     fun map k -> KVMap.find k map
@@ -179,75 +291,17 @@ module SRMap = struct
   let empty = KVMap.empty
 end
 
+include Symbol
+include Syntax
+include Rules
+include SRMap
+
 exception Unnormalized_rule
-
-(* Redefine NT. Totally hack *)
-type _ symbol +=
-  | NT : ('a SRMap.key * 'a prod_rule list) Lazy.t -> 'a symbol
-
-type sbox = SymBox : 'a symbol -> sbox
-
-let symbol_to_string : type a. a symbol -> string = fun s ->
-  match s with
-  | T token -> Tok.token_to_string token
-  | NT (lazy ({SRMap.stamp}, _)) -> stamp
-  | _ -> assert false
-
-(* very costly, should use hashtbl, maybe GADT hashtbl? *)
-(* compare symbols *)
-let compare_symbols : type a b. a symbol -> b symbol -> (a, b) O.ordering = fun s1 s2 ->
-  match s1, s2 with
-  | T t1 , T t2 -> Tok.compare_token t1 t2
-  | NT (lazy (k1,_)), NT (lazy (k2, _)) -> SRMap.compare_keys k1 k2
-  | T _, NT _ -> O.LT
-  | _ -> O.GT
-
-(* split semantic action and syntax from an applicative structure *)
-let rec split : type a. a prod_rule -> a norm_prod_rule = function
-  | SemAct semantic -> S {semantic; syntax = SNil}
-  | Appl (f, sym) ->
-    let S {semantic; syntax} = split f in
-    S {semantic; syntax = snoc syntax sym}
-  | _ -> assert false
-
-let normalize_symbol: type a. a symbol -> a norm_prod_rule list = function
-  | T _ as t -> [S {semantic= (fun x -> x); syntax = SCons (t, SNil)}]
-  | NT (lazy (_, k_rules)) -> List.map split k_rules
-  | _ -> assert false
-
-let normalize_rule_lists : type a. (a prod_rule list) -> (a norm_prod_rule list) = fun pl ->
-  List.map split pl
 
 let pure f = SemAct f
 let (<*>) a b = Appl (a, b)
 
 let exact c = T (Tok.tok c)
-
-let build_srmap s =
-  let srmap = ref (SRMap.empty) in
-  let rec dfs : type a. a symbol -> unit = fun s ->
-    match s with
-    | T _ -> ()
-    | NT (lazy (k, _)) as nt -> begin
-      match SRMap.find !srmap k with
-      | Some _ -> ()
-      | None -> begin
-        let npr = normalize_symbol nt in
-        srmap := SRMap.add !srmap k npr;
-        List.iter (fun (S s) -> iter_syntax {iter = dfs} s.syntax) npr
-        end
-      end
-    | _ -> () in
-  dfs s;
-  !srmap
-
-let syn_to_string : type a b. (a, b) syn -> string = fun s ->
-  let buf = Buffer.create 20 in
-  let f s =
-    Buffer.add_string buf (symbol_to_string s); Buffer.add_string buf " " in
-  let iter = {iter = f} in
-  iter_syntax iter s;
-  Buffer.contents buf
 
 module ItemSet = struct
 
@@ -262,7 +316,7 @@ module ItemSet = struct
     match item with
     | Item (k, fst, snd, tl) ->
       Printf.sprintf "%s -> %s . %s [%s]"
-      (k.SRMap.stamp)
+      (SRMap.string_of_key k)
       (syn_to_string fst)
       (syn_to_string snd)
       (if Tok.is_empty tl then "$" else Tok.token_list_to_string tl)
@@ -382,7 +436,6 @@ module ItemSet = struct
             List.fold_left fold_f Tok.empty rules
           | None -> Tok.empty
           end
-        | _ -> assert false
         end in
     loop s
 
@@ -405,7 +458,6 @@ module ItemSet = struct
             union_all items
             end
           end
-        | _ -> assert false
         end in
     match item with
     | Item (_, _, _, token_list) -> loop item env token_list
